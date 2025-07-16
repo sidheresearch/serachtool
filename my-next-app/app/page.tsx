@@ -29,7 +29,7 @@ import {
   Pagination
 } from '@mui/material';
 import { Grid } from '@mui/material';
-import { Search, Business, Tag, DateRange, CalendarToday, QrCode, PersonPin, LocationOn, FilterList, Download, Visibility } from '@mui/icons-material';
+import { Search, Business, Tag, DateRange, CalendarToday, QrCode, PersonPin, LocationOn, FilterList, Download, Visibility, TrendingUp } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -60,6 +60,11 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState(1);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
+  // Top Importers state
+  const [topImporters, setTopImporters] = useState<TopImportersResponse | null>(null);
+  const [showTopImporters, setShowTopImporters] = useState(false);
+  const [loadingTopImporters, setLoadingTopImporters] = useState(false);
+
   const itemsPerPage = 10;
 
   const handlePrimarySearch = async () => {
@@ -132,6 +137,8 @@ export default function Home() {
     setShowFilters(false);
     setCurrentPage(1);
     setSuccessMessage(null);
+    setTopImporters(null);
+    setShowTopImporters(false);
   };
 
   const exportResults = () => {
@@ -154,6 +161,39 @@ export default function Home() {
     a.download = `search_results_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
+  };
+
+  const fetchTopImporters = async () => {
+    if (!searchResults || (!productNames.length && !uniqueProductNames.length)) return;
+    
+    setLoadingTopImporters(true);
+    try {
+      const filters = {
+        hs_code: hsCode || undefined,
+        date_mode: dateMode,
+        single_date: dateMode === 'single' && singleDate ? singleDate.format('YYYY-MM-DD') : undefined,
+        start_date: dateMode === 'range' && startDate ? startDate.format('YYYY-MM-DD') : undefined,
+        end_date: dateMode === 'range' && endDate ? endDate.format('YYYY-MM-DD') : undefined,
+      };
+
+      let importersData: TopImportersResponse;
+      
+      if (productNames.length > 0) {
+        importersData = await tradeAPI.getTopImportersForProducts(productNames, filters);
+      } else if (uniqueProductNames.length > 0) {
+        importersData = await tradeAPI.getTopImportersForUniqueProducts(uniqueProductNames, filters);
+      } else {
+        return;
+      }
+
+      setTopImporters(importersData);
+      setShowTopImporters(true);
+    } catch (error) {
+      console.error('Error fetching top importers:', error);
+      setSearchError('Failed to fetch top importers data');
+    } finally {
+      setLoadingTopImporters(false);
+    }
   };
 
   // Pagination
@@ -469,6 +509,31 @@ export default function Home() {
                           >
                             Export CSV
                           </Button>
+
+                          {hasData && (productNames.length > 0 || uniqueProductNames.length > 0) && (
+                            <Button
+                              variant="outlined"
+                              size="large"
+                              onClick={fetchTopImporters}
+                              disabled={loadingTopImporters}
+                              sx={{
+                                borderRadius: '16px',
+                                px: 4,
+                                py: 2,
+                                fontSize: '16px',
+                                fontWeight: 600,
+                                borderColor: '#f59e0b',
+                                color: '#f59e0b',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                                  borderColor: '#f59e0b',
+                                },
+                              }}
+                              startIcon={loadingTopImporters ? <CircularProgress size={20} /> : <TrendingUp />}
+                            >
+                              {loadingTopImporters ? 'Loading...' : 'Top Importers'}
+                            </Button>
+                          )}
                         </>
                       )}
                     </Box>
@@ -839,28 +904,79 @@ export default function Home() {
                           {searchResults.data.length > 0 ? (
                             <Box>
                               <TableContainer sx={{ maxHeight: '600px' }}>
-                                <Table stickyHeader>
+                                <Table stickyHeader size="small">
                                   <TableHead>
                                     <TableRow>
-                                      {Object.keys(searchResults.data[0]).slice(0, 6).map((key) => (
-                                        <TableCell 
-                                          key={key}
-                                          sx={{ 
-                                            fontWeight: 600,
-                                            backgroundColor: 'rgba(102, 126, 234, 0.05)',
-                                            borderBottom: '2px solid rgba(102, 126, 234, 0.1)'
-                                          }}
-                                        >
-                                          {key.replace(/_/g, ' ').toUpperCase()}
-                                        </TableCell>
-                                      ))}
-                                      <TableCell 
-                                        sx={{ 
-                                          fontWeight: 600,
-                                          backgroundColor: 'rgba(102, 126, 234, 0.05)',
-                                          borderBottom: '2px solid rgba(102, 126, 234, 0.1)'
-                                        }}
-                                      >
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
+                                        SYSTEM ID
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 110 }}>
+                                        REG DATE
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
+                                        MONTH YEAR
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
+                                        HS CODE
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 80 }}>
+                                        CHAPTER
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 200 }}>
+                                        PRODUCT NAME
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 200 }}>
+                                        UNIQUE PRODUCT NAME
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
+                                        QUANTITY
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 80 }}>
+                                        UNIT
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
+                                        UNIT PRICE (USD)
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 140 }}>
+                                        TOTAL VALUE (USD)
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
+                                        IMPORTER ID
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 200 }}>
+                                        IMPORTER NAME
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
+                                        CITY
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 150 }}>
+                                        CHA NUMBER
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 150 }}>
+                                        TYPE
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 200 }}>
+                                        SUPPLIER NAME
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 250 }}>
+                                        SUPPLIER ADDRESS
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
+                                        INDIAN PORT
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
+                                        FOREIGN PORT
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
+                                        ORIGIN COUNTRY
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
+                                        EXCHANGE RATE
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
+                                        DUTY
+                                      </TableCell>
+                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
                                         ACTIONS
                                       </TableCell>
                                     </TableRow>
@@ -878,22 +994,166 @@ export default function Home() {
                                           }
                                         }}
                                       >
-                                        {Object.values(row).slice(0, 6).map((value, cellIndex) => (
-                                          <TableCell key={cellIndex} sx={{ fontSize: '14px' }}>
-                                            {typeof value === 'string' && value.length > 50 
-                                              ? `${value.substring(0, 50)}...` 
-                                              : String(value || '-')
+                                        <TableCell sx={{ fontSize: '13px', fontFamily: 'monospace' }}>
+                                          {row.system_id || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px' }}>
+                                          {row.reg_date ? new Date(row.reg_date).toLocaleDateString() : '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px' }}>
+                                          {row.month_year || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', fontFamily: 'monospace' }}>
+                                          {row.hs_code || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px' }}>
+                                          {row.chapter || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', maxWidth: 200 }}>
+                                          <Box 
+                                            title={row.product_name || '-'}
+                                            sx={{ 
+                                              overflow: 'hidden', 
+                                              textOverflow: 'ellipsis', 
+                                              whiteSpace: 'nowrap' 
+                                            }}
+                                          >
+                                            {row.product_name && row.product_name.length > 30 
+                                              ? `${row.product_name.substring(0, 30)}...` 
+                                              : row.product_name || '-'
                                             }
-                                          </TableCell>
-                                        ))}
-
+                                          </Box>
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', maxWidth: 200 }}>
+                                          <Box 
+                                            title={row.unique_product_name || '-'}
+                                            sx={{ 
+                                              overflow: 'hidden', 
+                                              textOverflow: 'ellipsis', 
+                                              whiteSpace: 'nowrap' 
+                                            }}
+                                          >
+                                            {row.unique_product_name && row.unique_product_name.length > 30 
+                                              ? `${row.unique_product_name.substring(0, 30)}...` 
+                                              : row.unique_product_name || '-'
+                                            }
+                                          </Box>
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
+                                          {row.quantity ? Number(row.quantity).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px' }}>
+                                          {row.unit_quantity || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
+                                          {row.unit_price_usd ? `$${Number(row.unit_price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right', fontWeight: 600 }}>
+                                          {row.total_value_usd ? `$${Number(row.total_value_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', fontFamily: 'monospace' }}>
+                                          {row.importer_id || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', maxWidth: 200 }}>
+                                          <Box 
+                                            title={row.true_importer_name || '-'}
+                                            sx={{ 
+                                              overflow: 'hidden', 
+                                              textOverflow: 'ellipsis', 
+                                              whiteSpace: 'nowrap' 
+                                            }}
+                                          >
+                                            {row.true_importer_name && row.true_importer_name.length > 25 
+                                              ? `${row.true_importer_name.substring(0, 25)}...` 
+                                              : row.true_importer_name || '-'
+                                            }
+                                          </Box>
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px' }}>
+                                          {row.city || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', maxWidth: 150 }}>
+                                          <Box 
+                                            title={row.cha_number || '-'}
+                                            sx={{ 
+                                              overflow: 'hidden', 
+                                              textOverflow: 'ellipsis', 
+                                              whiteSpace: 'nowrap' 
+                                            }}
+                                          >
+                                            {row.cha_number && row.cha_number.length > 20 
+                                              ? `${row.cha_number.substring(0, 20)}...` 
+                                              : row.cha_number || '-'
+                                            }
+                                          </Box>
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', maxWidth: 150 }}>
+                                          <Box 
+                                            title={row.type || '-'}
+                                            sx={{ 
+                                              overflow: 'hidden', 
+                                              textOverflow: 'ellipsis', 
+                                              whiteSpace: 'nowrap' 
+                                            }}
+                                          >
+                                            {row.type && row.type.length > 20 
+                                              ? `${row.type.substring(0, 20)}...` 
+                                              : row.type || '-'
+                                            }
+                                          </Box>
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', maxWidth: 200 }}>
+                                          <Box 
+                                            title={row.true_supplier_name || '-'}
+                                            sx={{ 
+                                              overflow: 'hidden', 
+                                              textOverflow: 'ellipsis', 
+                                              whiteSpace: 'nowrap' 
+                                            }}
+                                          >
+                                            {row.true_supplier_name && row.true_supplier_name.length > 25 
+                                              ? `${row.true_supplier_name.substring(0, 25)}...` 
+                                              : row.true_supplier_name || '-'
+                                            }
+                                          </Box>
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', maxWidth: 250 }}>
+                                          <Box 
+                                            title={row.supplier_address || '-'}
+                                            sx={{ 
+                                              overflow: 'hidden', 
+                                              textOverflow: 'ellipsis', 
+                                              whiteSpace: 'nowrap' 
+                                            }}
+                                          >
+                                            {row.supplier_address && row.supplier_address.length > 30 
+                                              ? `${row.supplier_address.substring(0, 30)}...` 
+                                              : row.supplier_address || '-'
+                                            }
+                                          </Box>
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px' }}>
+                                          {row.indian_port || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px' }}>
+                                          {row.foreign_port || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px' }}>
+                                          {row.origin_country || '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
+                                          {row.exchange_rate_usd ? Number(row.exchange_rate_usd).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-'}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
+                                          {row.duty ? Number(row.duty).toLocaleString() : '-'}
+                                        </TableCell>
                                         <TableCell>
                                           <Button
                                             size="small"
                                             startIcon={<Visibility />}
                                             onClick={() => {
                                               console.log('View details:', row);
-                                              // Add view details functionality here
+                                              // Add modal or detailed view functionality here
                                             }}
                                             sx={{ 
                                               fontSize: '12px',
@@ -949,35 +1209,218 @@ export default function Home() {
                       </Box>
                     </Fade>
                   )}
+
+                  {/* Top Importers Section */}
+                  {showTopImporters && topImporters && (
+                    <Fade in={showTopImporters} timeout={800}>
+                      <Box sx={{ mt: 4 }}>
+                        <Paper
+                          elevation={8}
+                          sx={{ 
+                            borderRadius: '20px',
+                            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.03) 0%, rgba(251, 191, 36, 0.03) 100%)',
+                            border: '1px solid rgba(245, 158, 11, 0.1)',
+                            overflow: 'hidden'
+                          }}
+                        >
+                          {/* Top Importers Header */}
+                          <Box sx={{ p: 4, pb: 2 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                              <Business2 sx={{ color: '#f59e0b', fontSize: 28 }} />
+                              <Typography 
+                                variant="h5" 
+                                sx={{ 
+                                  fontWeight: 700,
+                                  background: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
+                                  WebkitBackgroundClip: 'text',
+                                  WebkitTextFillColor: 'transparent',
+                                  backgroundClip: 'text',
+                                }}
+                              >
+                                📊 Top 10 Importers
+                              </Typography>
+                              <Chip 
+                                label={`${topImporters.count} importers found`}
+                                variant="outlined"
+                                sx={{ 
+                                  fontWeight: 600,
+                                  borderColor: '#f59e0b',
+                                  color: '#f59e0b',
+                                  fontSize: '14px'
+                                }}
+                              />
+                            </Box>
+                            
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                              Top importers by total value for: {topImporters.products_searched?.join(', ')}
+                            </Typography>
+                          </Box>
+                          
+                          {/* Top Importers Table */}
+                          {topImporters.data.length > 0 ? (
+                            <TableContainer sx={{ maxHeight: '500px' }}>
+                              <Table stickyHeader size="small">
+                                <TableHead>
+                                  <TableRow>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 50 }}>
+                                      RANK
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 250 }}>
+                                      IMPORTER NAME
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 120 }}>
+                                      IMPORTER ID
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 100 }}>
+                                      CITY
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 140 }}>
+                                      TOTAL VALUE (USD)
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 100 }}>
+                                      SHIPMENTS
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 120 }}>
+                                      TOTAL QUANTITY
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 120 }}>
+                                      AVG UNIT PRICE
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 110 }}>
+                                      FIRST IMPORT
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 110 }}>
+                                      LAST IMPORT
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 100 }}>
+                                      HS CODES
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 100 }}>
+                                      COUNTRIES
+                                    </TableCell>
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {topImporters.data.map((importer, index) => (
+                                    <TableRow 
+                                      key={index}
+                                      sx={{ 
+                                        '&:hover': { 
+                                          backgroundColor: 'rgba(245, 158, 11, 0.02)' 
+                                        },
+                                        '&:nth-of-type(even)': {
+                                          backgroundColor: 'rgba(0, 0, 0, 0.01)'
+                                        }
+                                      }}
+                                    >
+                                      <TableCell sx={{ fontSize: '13px', fontWeight: 600 }}>
+                                        <Chip 
+                                          label={`#${index + 1}`}
+                                          size="small"
+                                          sx={{ 
+                                            backgroundColor: index < 3 ? '#f59e0b' : 'rgba(245, 158, 11, 0.1)',
+                                            color: index < 3 ? 'white' : '#f59e0b',
+                                            fontWeight: 600
+                                          }}
+                                        />
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', maxWidth: 250 }}>
+                                        <Box 
+                                          title={importer.true_importer_name || '-'}
+                                          sx={{ 
+                                            overflow: 'hidden', 
+                                            textOverflow: 'ellipsis', 
+                                            whiteSpace: 'nowrap',
+                                            fontWeight: 500
+                                          }}
+                                        >
+                                          {importer.true_importer_name && importer.true_importer_name.length > 35 
+                                            ? `${importer.true_importer_name.substring(0, 35)}...` 
+                                            : importer.true_importer_name || '-'
+                                          }
+                                        </Box>
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', fontFamily: 'monospace' }}>
+                                        {importer.importer_id || '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px' }}>
+                                        {importer.city || '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', textAlign: 'right', fontWeight: 600, color: '#059669' }}>
+                                        {importer.total_value_usd ? `$${Number(importer.total_value_usd).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
+                                        {importer.total_shipments ? Number(importer.total_shipments).toLocaleString() : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
+                                        {importer.total_quantity ? Number(importer.total_quantity).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
+                                        {importer.avg_unit_price_usd ? `$${Number(importer.avg_unit_price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px' }}>
+                                        {importer.first_import_date ? new Date(importer.first_import_date).toLocaleDateString() : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px' }}>
+                                        {importer.last_import_date ? new Date(importer.last_import_date).toLocaleDateString() : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', textAlign: 'center' }}>
+                                        <Chip 
+                                          label={importer.unique_hs_codes || 0}
+                                          size="small"
+                                          variant="outlined"
+                                          sx={{ 
+                                            borderColor: '#f59e0b',
+                                            color: '#f59e0b',
+                                            fontSize: '12px'
+                                          }}
+                                        />
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', textAlign: 'center' }}>
+                                        <Chip 
+                                          label={importer.unique_countries || 0}
+                                          size="small"
+                                          variant="outlined"
+                                          sx={{ 
+                                            borderColor: '#f59e0b',
+                                            color: '#f59e0b',
+                                            fontSize: '12px'
+                                          }}
+                                        />
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </TableContainer>
+                          ) : (
+                            <Box 
+                              sx={{ 
+                                textAlign: 'center', 
+                                py: 6,
+                                px: 4
+                              }}
+                            >
+                              <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+                                No importers found
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                No importer data available for the selected products
+                              </Typography>
+                            </Box>
+                          )}
+                        </Paper>
+                      </Box>
+                    </Fade>
+                  )}
+
+                  {/* ... rest of existing code ... */}
                 </CardContent>
               </Card>
             </Box>
           </Fade>
         </Container>
       </Box>
-
-      {/* Success/Error Snackbars */}
-      <Snackbar
-        open={!!successMessage}
-        autoHideDuration={6000}
-        onClose={() => setSuccessMessage(null)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert onClose={() => setSuccessMessage(null)} severity="success" sx={{ width: '100%' }}>
-          {successMessage}
-        </Alert>
-      </Snackbar>
-
-      <Snackbar
-        open={!!searchError}
-        autoHideDuration={8000}
-        onClose={() => setSearchError(null)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert onClose={() => setSearchError(null)} severity="error" sx={{ width: '100%' }}>
-          {searchError}
-        </Alert>
-      </Snackbar>
     </LocalizationProvider>
   );
 }
