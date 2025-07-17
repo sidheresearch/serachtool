@@ -29,13 +29,14 @@ import {
   Pagination
 } from '@mui/material';
 import { Grid } from '@mui/material';
-import { Search, Business, Tag, DateRange, CalendarToday, QrCode, PersonPin, LocationOn, FilterList, Download, Visibility, TrendingUp } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
 import { AutocompleteInput } from './components/AutocompleteInput';
-import { tradeAPI, SearchResponse } from './utils/api';
+import { tradeAPI, SearchResponse, TopImportersResponse } from './utils/api';
+import { Search, Business, Tag, DateRange, CalendarToday, QrCode, PersonPin, LocationOn, FilterList, Download, Visibility, TrendingUp } from '@mui/icons-material';
+import { ImporterChart } from './components/ImporterChart';
 
 export default function Home() {
   // State management
@@ -1226,7 +1227,6 @@ export default function Home() {
                           {/* Top Importers Header */}
                           <Box sx={{ p: 4, pb: 2 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                              <Business2 sx={{ color: '#f59e0b', fontSize: 28 }} />
                               <Typography 
                                 variant="h5" 
                                 sx={{ 
@@ -1410,6 +1410,14 @@ export default function Home() {
                             </Box>
                           )}
                         </Paper>
+
+                        {/* Add the Chart Component */}
+                        <Box sx={{ mt: 4 }}>
+                          <ImporterChart 
+                            data={topImporters.data} 
+                            products_searched={topImporters.products_searched || []}
+                          />
+                        </Box>
                       </Box>
                     </Fade>
                   )}
