@@ -1,128 +1,215 @@
 'use client';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { 
-  Container, 
-  Paper, 
-  TextField, 
-  Typography, 
   Box, 
-  InputAdornment,
-  Fade,
-  Card,
-  CardContent,
-  FormControl,
-  RadioGroup,
-  FormControlLabel,
-  Radio,
-  Divider,
-  Button,
-  CircularProgress,
-  Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
+  Container, 
+  Card, 
+  CardContent, 
+  Fade, 
   Alert,
-  Snackbar,
-  Pagination
+  Snackbar
 } from '@mui/material';
-import { Grid } from '@mui/material';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
-import { AutocompleteInput } from './components/AutocompleteInput';
-import { tradeAPI, SearchResponse, TopImportersResponse } from './utils/api';
-import { Search, Business, Tag, DateRange, CalendarToday, QrCode, PersonPin, LocationOn, FilterList, Download, Visibility, TrendingUp } from '@mui/icons-material';
-import { ImporterChart } from './components/ImporterChart';
+
+// Import all components
+import { Header } from './components/Header';
+import { SearchForm } from './components/SearchForm';
+import { AdvancedFilters } from './components/AdvancedFilters';
+import { QuickDateFilters } from './components/QuickDateFilters';
+import { ResultsTable } from './components/ResultsTable';
+import { TopImportersSection } from './components/TopImportersSection';
+import { ClientSideFilters } from './components/ClientSideFilters';
+
+// Import API and types
+import { tradeAPI, SearchResponse, TopImportersResponse, SearchFilters } from './utils/api';
 
 export default function Home() {
-  // State management
+  // Search state
   const [productNames, setProductNames] = useState<string[]>([]);
   const [uniqueProductNames, setUniqueProductNames] = useState<string[]>([]);
   const [entities, setEntities] = useState<string[]>([]);
   
+  // Filter state
   const [hsCode, setHsCode] = useState('');
   const [importerId, setImporterId] = useState('');
   const [portName, setPortName] = useState('');
-  const [dateMode, setDateMode] = useState<'single' | 'range'>('single');
+  const [dateMode, setDateMode] = useState<'single' | 'range'>('range');
   const [singleDate, setSingleDate] = useState<Dayjs | null>(null);
   const [startDate, setStartDate] = useState<Dayjs | null>(null);
   const [endDate, setEndDate] = useState<Dayjs | null>(null);
   
-  // API state
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasData, setHasData] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  // UI state
   const [showFilters, setShowFilters] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingTopImporters, setLoadingTopImporters] = useState(false);
   
-  // Top Importers state
+  // Results state
+  const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
+  const [originalResults, setOriginalResults] = useState<SearchResponse | null>(null);
   const [topImporters, setTopImporters] = useState<TopImportersResponse | null>(null);
   const [showTopImporters, setShowTopImporters] = useState(false);
-  const [loadingTopImporters, setLoadingTopImporters] = useState(false);
+  const [filteredResults, setFilteredResults] = useState<SearchResponse | null>(null);
+  const [clientFilters, setClientFilters] = useState({
+    hsCode: '',
+    importerId: '',
+    portName: '',
+    importerName: ''
+  });
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
+  
+  // Notification state
+  const [notification, setNotification] = useState<{
+    open: boolean;
+    message: string;
+    severity: 'success' | 'error' | 'info' | 'warning';
+  }>({
+    open: false,
+    message: '',
+    severity: 'info'
+  });
 
-  const itemsPerPage = 10;
+  // Computed values
+  const currentResults = filteredResults || searchResults;
+  const hasData = currentResults && currentResults.data.length > 0;
+  const totalPages = hasData ? Math.ceil(currentResults.data.length / itemsPerPage) : 0;
+  const paginatedData = hasData 
+    ? currentResults.data.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+    : [];
 
-  const handlePrimarySearch = async () => {
-    // Check if at least one primary field is filled
+  // Helper functions
+  const showNotification = (message: string, severity: 'success' | 'error' | 'info' | 'warning' = 'info') => {
+    setNotification({ open: true, message, severity });
+  };
+
+  const buildFilters = (): SearchFilters => {
+    const filters: SearchFilters = {};
+    
+    // Add the basic filters
+    if (hsCode.trim()) filters.hs_code = hsCode.trim();
+    if (importerId.trim()) filters.importer_id = importerId.trim();
+    if (portName.trim()) filters.port_name = portName.trim();
+    
+    // Add date filters
+    filters.date_mode = dateMode;
+    if (dateMode === 'single' && singleDate) {
+      filters.single_date = singleDate.format('YYYY-MM-DD');
+    } else if (dateMode === 'range' && startDate && endDate) {
+      filters.start_date = startDate.format('YYYY-MM-DD');
+      filters.end_date = endDate.format('YYYY-MM-DD');
+    }
+    
+    console.log('Applied filters:', filters);
+    return filters;
+  };
+
+  const applyClientSideFilters = useCallback((filters: {
+    hsCode: string;
+    importerId: string;
+    portName: string;
+    importerName: string;
+  }) => {
+    if (!searchResults || searchResults.data.length === 0) return;
+
+    setClientFilters(filters);
+
+    const filtered = searchResults.data.filter(item => {
+      // HS Code filter
+      if (filters.hsCode && !item.hs_code?.toLowerCase().includes(filters.hsCode.toLowerCase())) {
+        return false;
+      }
+      
+      // Importer ID filter
+      if (filters.importerId && !item.importer_id?.toLowerCase().includes(filters.importerId.toLowerCase())) {
+        return false;
+      }
+      
+      // Port Name filter (check both indian_port and foreign_port)
+      if (filters.portName) {
+        const portNameLower = filters.portName.toLowerCase();
+        const indianPort = item.indian_port?.toLowerCase() || '';
+        const foreignPort = item.foreign_port?.toLowerCase() || '';
+        
+        if (!indianPort.includes(portNameLower) && !foreignPort.includes(portNameLower)) {
+          return false;
+        }
+      }
+      
+      // Importer Name filter
+      if (filters.importerName && !item.true_importer_name?.toLowerCase().includes(filters.importerName.toLowerCase())) {
+        return false;
+      }
+      
+      return true;
+    });
+
+    setFilteredResults({
+      ...searchResults,
+      data: filtered,
+      count: filtered.length
+    });
+
+    setCurrentPage(1); // Reset to first page
+    showNotification(`Filtered to ${filtered.length} results`, 'info');
+  }, [searchResults, showNotification]);
+
+  const clearClientSideFilters = useCallback(() => {
+    setFilteredResults(null);
+    setClientFilters({
+      hsCode: '',
+      importerId: '',
+      portName: '',
+      importerName: ''
+    });
+    setCurrentPage(1);
+    showNotification('Filters cleared', 'info');
+  }, [showNotification]);
+
+  const handlePrimarySearch = useCallback(async () => {
     if (productNames.length === 0 && uniqueProductNames.length === 0 && entities.length === 0) {
-      setSearchError('Please select at least one item from the suggestions');
+      showNotification('Please select at least one search term', 'warning');
       return;
     }
 
     setIsLoading(true);
-    setSearchError(null);
     setCurrentPage(1);
+    setShowTopImporters(false);
+    
+    // Clear client filters on new search
+    setFilteredResults(null);
+    setClientFilters({ hsCode: '', importerId: '', portName: '', importerName: '' });
     
     try {
-      const filters = {
-        hs_code: hsCode || undefined,
-        importer_id: importerId || undefined,
-        port_name: portName || undefined,
-        date_mode: dateMode,
-        single_date: dateMode === 'single' && singleDate ? singleDate.format('YYYY-MM-DD') : undefined,
-        start_date: dateMode === 'range' && startDate ? startDate.format('YYYY-MM-DD') : undefined,
-        end_date: dateMode === 'range' && endDate ? endDate.format('YYYY-MM-DD') : undefined,
-      };
+      const filters = buildFilters();
+      let response: SearchResponse;
 
-      let results: SearchResponse;
-      
-      // Call appropriate API based on what's selected
       if (productNames.length > 0) {
-        results = await tradeAPI.searchProducts(productNames, filters);
-        setSuccessMessage(`Found ${results.count} products matching your search criteria`);
+        response = await tradeAPI.searchProducts(productNames, filters);
       } else if (uniqueProductNames.length > 0) {
-        results = await tradeAPI.searchUniqueProducts(uniqueProductNames, filters);
-        setSuccessMessage(`Found ${results.count} unique products matching your search criteria`);
-      } else if (entities.length > 0) {
-        results = await tradeAPI.searchEntities(entities, filters);
-        setSuccessMessage(`Found ${results.count} records for the selected entities`);
+        response = await tradeAPI.searchUniqueProducts(uniqueProductNames, filters);
       } else {
-        throw new Error('No search criteria provided');
+        response = await tradeAPI.searchEntities(entities, filters);
       }
 
-      console.log('Search results:', results);
-      setSearchResults(results);
-      setHasData(true);
-      setShowFilters(true);
+      setSearchResults(response);
+      setOriginalResults(response);
       
+      if (response.data.length > 0) {
+        showNotification(`Found ${response.count} results`, 'success');
+      } else {
+        showNotification('No results found. Try adjusting your search criteria.', 'info');
+      }
     } catch (error) {
-      console.error('Search failed:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Search failed. Please try again.';
-      setSearchError(errorMessage);
-      setSearchResults(null);
-      setHasData(false);
+      console.error('Search error:', error);
+      showNotification('Search failed. Please try again.', 'error');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [productNames, uniqueProductNames, entities, hsCode, importerId, portName, dateMode, singleDate, startDate, endDate]);
 
-  const clearSearch = () => {
+  const clearSearch = useCallback(() => {
     setProductNames([]);
     setUniqueProductNames([]);
     setEntities([]);
@@ -132,1303 +219,298 @@ export default function Home() {
     setSingleDate(null);
     setStartDate(null);
     setEndDate(null);
-    setHasData(false);
     setSearchResults(null);
-    setSearchError(null);
-    setShowFilters(false);
-    setCurrentPage(1);
-    setSuccessMessage(null);
+    setOriginalResults(null);
     setTopImporters(null);
     setShowTopImporters(false);
-  };
+    setCurrentPage(1);
+    showNotification('Search cleared', 'info');
+  }, []);
 
-  const exportResults = () => {
-    if (!searchResults?.data?.length) return;
-    
-    // Create CSV content
-    const headers = Object.keys(searchResults.data[0]).join(',');
-    const rows = searchResults.data.map(row => 
-      Object.values(row).map(val => 
-        typeof val === 'string' && val.includes(',') ? `"${val}"` : val
-      ).join(',')
-    );
-    const csvContent = [headers, ...rows].join('\n');
-    
-    // Download file
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `search_results_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
+  const handleQuickDateFilterExistingData = useCallback((days: number) => {
+    if (!originalResults || originalResults.data.length === 0) {
+      showNotification('No data to filter', 'warning');
+      return;
+    }
 
-  const fetchTopImporters = async () => {
-    if (!searchResults || (!productNames.length && !uniqueProductNames.length)) return;
+    const cutoffDate = dayjs().subtract(days, 'day');
+    const filteredData = originalResults.data.filter(item => {
+      if (!item.reg_date) return false;
+      return dayjs(item.reg_date).isAfter(cutoffDate);
+    });
+
+    setSearchResults({
+      ...originalResults,
+      data: filteredData,
+      count: filteredData.length
+    });
     
-    setLoadingTopImporters(true);
+    setCurrentPage(1);
+    showNotification(`Filtered to last ${days} days: ${filteredData.length} results`, 'info');
+  }, [originalResults]);
+
+  const handleClearDateFilter = useCallback(() => {
+    if (originalResults) {
+      setSearchResults(originalResults);
+      setCurrentPage(1);
+      showNotification('Date filter cleared', 'info');
+    }
+  }, [originalResults]);
+
+  const handleCustomDateRangeSearch = useCallback(async (startDateStr: string, endDateStr: string) => {
+    if (productNames.length === 0 && uniqueProductNames.length === 0) {
+      showNotification('Please select products first', 'warning');
+      return;
+    }
+
+    setIsLoading(true);
+    
     try {
-      const filters = {
-        hs_code: hsCode || undefined,
-        date_mode: dateMode,
-        single_date: dateMode === 'single' && singleDate ? singleDate.format('YYYY-MM-DD') : undefined,
-        start_date: dateMode === 'range' && startDate ? startDate.format('YYYY-MM-DD') : undefined,
-        end_date: dateMode === 'range' && endDate ? endDate.format('YYYY-MM-DD') : undefined,
+      const filters: SearchFilters = {
+        ...buildFilters(),
+        date_mode: 'range',
+        start_date: startDateStr,
+        end_date: endDateStr
       };
 
-      let importersData: TopImportersResponse;
-      
+      let response: SearchResponse;
       if (productNames.length > 0) {
-        importersData = await tradeAPI.getTopImportersForProducts(productNames, filters);
-      } else if (uniqueProductNames.length > 0) {
-        importersData = await tradeAPI.getTopImportersForUniqueProducts(uniqueProductNames, filters);
+        response = await tradeAPI.searchProducts(productNames, filters);
       } else {
-        return;
+        response = await tradeAPI.searchUniqueProducts(uniqueProductNames, filters);
       }
 
-      setTopImporters(importersData);
-      setShowTopImporters(true);
+      setSearchResults(response);
+      setOriginalResults(response);
+      setCurrentPage(1);
+      
+      showNotification(`Custom date range applied: ${response.count} results`, 'success');
     } catch (error) {
-      console.error('Error fetching top importers:', error);
-      setSearchError('Failed to fetch top importers data');
+      console.error('Custom date search error:', error);
+      showNotification('Date range search failed', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [productNames, uniqueProductNames, hsCode, importerId, portName]);
+
+  const fetchTopImporters = useCallback(async () => {
+    if (productNames.length === 0 && uniqueProductNames.length === 0) {
+      showNotification('Please search for products first', 'warning');
+      return;
+    }
+
+    setLoadingTopImporters(true);
+    
+    try {
+      const filters = buildFilters();
+      let response: TopImportersResponse;
+
+      if (productNames.length > 0) {
+        response = await tradeAPI.getTopImportersForProducts(productNames, filters);
+      } else {
+        response = await tradeAPI.getTopImportersForUniqueProducts(uniqueProductNames, filters);
+      }
+
+      setTopImporters(response);
+      setShowTopImporters(true);
+      showNotification(`Found top ${response.data.length} importers`, 'success');
+    } catch (error) {
+      console.error('Top importers error:', error);
+      showNotification('Failed to fetch top importers', 'error');
     } finally {
       setLoadingTopImporters(false);
     }
-  };
+  }, [productNames, uniqueProductNames, hsCode, importerId, portName, dateMode, singleDate, startDate, endDate]);
 
-  // Pagination
-  const totalPages = searchResults ? Math.ceil(searchResults.data.length / itemsPerPage) : 0;
-  const paginatedData = searchResults?.data?.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  ) || [];
+  const exportResults = useCallback(() => {
+    // Use currentResults instead of searchResults to export filtered data
+    const dataToExport = currentResults || searchResults;
+    
+    if (!dataToExport || dataToExport.data.length === 0) {
+      showNotification('No data to export', 'warning');
+      return;
+    }
+
+    try {
+      const headers = [
+        'System ID', 'Registration Date', 'Month Year', 'HS Code', 'Chapter',
+        'Product Name', 'Unique Product Name', 'Quantity', 'Unit', 'Unit Price USD',
+        'Total Value USD', 'Importer ID', 'Importer Name', 'City', 'CHA Number',
+        'Type', 'Supplier Name', 'Supplier Address', 'Indian Port', 'Foreign Port',
+        'Origin Country', 'Exchange Rate USD', 'Duty'
+      ];
+
+      const csvContent = [
+        headers.join(','),
+        ...dataToExport.data.map(row => [
+          row.system_id || '',
+          row.reg_date || '',
+          row.month_year || '',
+          row.hs_code || '',
+          row.chapter || '',
+          `"${(row.product_name || '').replace(/"/g, '""')}"`,
+          `"${(row.unique_product_name || '').replace(/"/g, '""')}"`,
+          row.quantity || '',
+          row.unit_quantity || '',
+          row.unit_price_usd || '',
+          row.total_value_usd || '',
+          row.importer_id || '',
+          `"${(row.true_importer_name || '').replace(/"/g, '""')}"`,
+          row.city || '',
+          row.cha_number || '',
+          row.type || '',
+          `"${(row.true_supplier_name || '').replace(/"/g, '""')}"`,
+          `"${(row.supplier_address || '').replace(/"/g, '""')}"`,
+          row.indian_port || '',
+          row.foreign_port || '',
+          row.origin_country || '',
+          row.exchange_rate_usd || '',
+          row.duty || ''
+        ].join(',')),
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `trade_data_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      const isFiltered = filteredResults !== null;
+      showNotification(
+        `${isFiltered ? 'Filtered ' : ''}Data exported successfully (${dataToExport.data.length} rows)`, 
+        'success'
+      );
+    } catch (error) {
+      console.error('Export error:', error);
+      showNotification('Export failed', 'error');
+    }
+  }, [currentResults, searchResults, filteredResults, showNotification]);
 
   return (
-    <LocalizationProvider dateAdapter={AdapterDayjs}>
-      <Box 
-        sx={{ 
-          minHeight: '100vh',
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          py: 4
-        }}
+    <Box 
+      sx={{ 
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        py: 4
+      }}
+    >
+      <Container maxWidth="xl" sx={{ px: { xs: 2, sm: 3 } }}>
+        <Fade in={true} timeout={1000}>
+          <Box>
+            
+            <Header />
+
+            <Card 
+              elevation={24}
+              sx={{ 
+                borderRadius: '24px',
+                background: 'rgba(255, 255, 255, 0.98)',
+                backdropFilter: 'blur(20px)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                overflow: 'visible',
+                position: 'relative',
+              }}
+            >
+              <CardContent sx={{ p: { xs: 3, sm: 4, md: 6 } }}>
+                {/* Search Form */}
+                <SearchForm
+                  productNames={productNames}
+                  setProductNames={setProductNames}
+                  uniqueProductNames={uniqueProductNames}
+                  setUniqueProductNames={setUniqueProductNames}
+                  entities={entities}
+                  setEntities={setEntities}
+                  isLoading={isLoading}
+                  handlePrimarySearch={handlePrimarySearch}
+                  clearSearch={clearSearch}
+                  hasData={!!hasData}
+                  showFilters={showFilters}
+                  setShowFilters={setShowFilters}
+                  exportResults={exportResults}
+                  fetchTopImporters={fetchTopImporters}
+                  loadingTopImporters={loadingTopImporters}
+                />
+
+                {/* Advanced Filters */}
+                <AdvancedFilters
+                  showFilters={showFilters}
+                  hsCode={hsCode}
+                  setHsCode={setHsCode}
+                  importerId={importerId}
+                  setImporterId={setImporterId}
+                  portName={portName}
+                  setPortName={setPortName}
+                  dateMode={dateMode}
+                  setDateMode={setDateMode}
+                  singleDate={singleDate}
+                  setSingleDate={setSingleDate}
+                  startDate={startDate}
+                  setStartDate={setStartDate}
+                  endDate={endDate}
+                  setEndDate={setEndDate}
+                />
+
+                {/* Quick Date Filters */}
+                <QuickDateFilters
+                  hasData={!!hasData}
+                  isLoading={isLoading}
+                  handleQuickDateFilterExistingData={handleQuickDateFilterExistingData}
+                  handleClearDateFilter={handleClearDateFilter}
+                  handleCustomDateRangeSearch={handleCustomDateRangeSearch}
+                  dateMode={dateMode}
+                  singleDate={singleDate}
+                  startDate={startDate}
+                  endDate={endDate}
+                />
+
+                {/* Results Table */}
+                <ResultsTable
+                  hasData={!!hasData}
+                  searchResults={searchResults}
+                  currentPage={currentPage}
+                  setCurrentPage={setCurrentPage}
+                  itemsPerPage={itemsPerPage}
+                />
+
+                {/* Top Importers Section */}
+                <TopImportersSection
+                  showTopImporters={showTopImporters}
+                  topImporters={topImporters}
+                />
+
+                {/* Client Side Filters - New Component */}
+                <ClientSideFilters
+                  clientFilters={clientFilters}
+                  applyClientSideFilters={applyClientSideFilters}
+                  clearClientSideFilters={clearClientSideFilters}
+                  isLoading={isLoading}
+                />
+              </CardContent>
+            </Card>
+          </Box>
+        </Fade>
+      </Container>
+
+      {/* Notification Snackbar */}
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={4000}
+        onClose={() => setNotification(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <Container maxWidth="xl" sx={{ px: { xs: 2, sm: 3 } }}>
-          <Fade in={true} timeout={1000}>
-            <Box>
-              {/* Header Section */}
-              <Box textAlign="center" mb={6}>
-                <Typography 
-                  variant="h3" 
-                  component="h1" 
-                  gutterBottom
-                  sx={{ 
-                    fontWeight: 800,
-                    color: 'white',
-                    textShadow: '0 2px 10px rgba(0,0,0,0.3)',
-                    mb: 2,
-                  }}
-                >
-                  🔍 Trade Analytics Tool
-                </Typography>
-                <Typography 
-                  variant="h6" 
-                  sx={{ 
-                    color: 'rgba(255,255,255,0.9)',
-                    maxWidth: 600, 
-                    mx: 'auto',
-                    fontWeight: 400,
-                    textShadow: '0 1px 5px rgba(0,0,0,0.2)',
-                  }}
-                >
-                  Discover and analyze trade data with advanced search capabilities
-                </Typography>
-              </Box>
-
-              {/* Main Search Card */}
-              <Card 
-                elevation={24}
-                sx={{ 
-                  borderRadius: '24px',
-                  background: 'rgba(255, 255, 255, 0.98)',
-                  backdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(255, 255, 255, 0.3)',
-                  overflow: 'visible',
-                  position: 'relative',
-                }}
-              >
-                <CardContent sx={{ p: { xs: 3, sm: 4, md: 6 } }}>
-                  {/* Primary Search Section */}
-                  <Box mb={4}>
-                    <Typography 
-                      variant="h4" 
-                      sx={{ 
-                        mb: 1, 
-                        fontWeight: 700, 
-                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                        WebkitBackgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent',
-                        backgroundClip: 'text',
-                      }}
-                    >
-                      🎯 Search Products
-                    </Typography>
-                    <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-                      Start typing to see suggestions and select from the dropdown
-                    </Typography>
-
-                    <Grid container spacing={4}>
-                      <Grid item xs={12}>
-                        <AutocompleteInput
-                          label="Search by Product Name"
-                          placeholder="Type to search products..."
-                          searchType="product_name"
-                          value={productNames}
-                          onChange={setProductNames}
-                          disabled={isLoading}
-                          icon={<Search sx={{ color: '#667eea' }} />}
-                          sx={{
-                            '& .MuiOutlinedInput-root': {
-                              borderRadius: '16px',
-                              minHeight: '72px',
-                              fontSize: '18px',
-                              minWidth: '100%',
-                              transition: 'all 0.3s ease',
-                              backgroundColor: 'rgba(102, 126, 234, 0.03)',
-                              border: '2px solid rgba(102, 126, 234, 0.1)',
-                              '&:hover': {
-                                backgroundColor: 'rgba(102, 126, 234, 0.08)',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 8px 25px rgba(102, 126, 234, 0.15)',
-                                borderColor: 'rgba(102, 126, 234, 0.3)',
-                              },
-                              '&.Mui-focused': {
-                                backgroundColor: 'rgba(102, 126, 234, 0.08)',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 8px 30px rgba(102, 126, 234, 0.25)',
-                                borderColor: '#667eea',
-                              },
-                            },
-                            '& .MuiInputLabel-root': {
-                              fontSize: '18px',
-                              fontWeight: 500,
-                            },
-                            '& .MuiAutocomplete-input': {
-                              fontSize: '18px',
-                              padding: '16px 8px',
-                            },
-                          }}
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <AutocompleteInput
-                          label="Search by Unique Product Name"
-                          placeholder="Type to search unique products..."
-                          searchType="unique_product_name"
-                          value={uniqueProductNames}
-                          onChange={setUniqueProductNames}
-                          disabled={isLoading}
-                          icon={<Tag sx={{ color: '#764ba2' }} />}
-                          sx={{
-                            '& .MuiOutlinedInput-root': {
-                              borderRadius: '16px',
-                              minHeight: '72px',
-                              fontSize: '18px',
-                              minWidth: '100%',
-                              transition: 'all 0.3s ease',
-                              backgroundColor: 'rgba(118, 75, 162, 0.03)',
-                              border: '2px solid rgba(118, 75, 162, 0.1)',
-                              '&:hover': {
-                                backgroundColor: 'rgba(118, 75, 162, 0.08)',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 8px 25px rgba(118, 75, 162, 0.15)',
-                                borderColor: 'rgba(118, 75, 162, 0.3)',
-                              },
-                              '&.Mui-focused': {
-                                backgroundColor: 'rgba(118, 75, 162, 0.08)',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 8px 30px rgba(118, 75, 162, 0.25)',
-                                borderColor: '#764ba2',
-                              },
-                            },
-                            '& .MuiInputLabel-root': {
-                              fontSize: '18px',
-                              fontWeight: 500,
-                            },
-                            '& .MuiAutocomplete-input': {
-                              fontSize: '18px',
-                              padding: '16px 8px',
-                            },
-                          }}
-                        />
-                      </Grid>
-                      
-                      <Grid item xs={12}>
-                        <AutocompleteInput
-                          label="Search by Entity"
-                          placeholder="Type to search entities..."
-                          searchType="entity"
-                          value={entities}
-                          onChange={setEntities}
-                          disabled={isLoading}
-                          icon={<Business sx={{ color: '#10b981' }} />}
-                          sx={{
-                            '& .MuiOutlinedInput-root': {
-                              borderRadius: '16px',
-                              minHeight: '72px',
-                              fontSize: '18px',
-                              minWidth: '100%',
-                              transition: 'all 0.3s ease',
-                              backgroundColor: 'rgba(16, 185, 129, 0.03)',
-                              border: '2px solid rgba(16, 185, 129, 0.1)',
-                              '&:hover': {
-                                backgroundColor: 'rgba(16, 185, 129, 0.08)',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 8px 25px rgba(16, 185, 129, 0.15)',
-                                borderColor: 'rgba(16, 185, 129, 0.3)',
-                              },
-                              '&.Mui-focused': {
-                                backgroundColor: 'rgba(16, 185, 129, 0.08)',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 8px 30px rgba(16, 185, 129, 0.25)',
-                                borderColor: '#10b981',
-                              },
-                            },
-                            '& .MuiInputLabel-root': {
-                              fontSize: '18px',
-                              fontWeight: 500,
-                            },
-                            '& .MuiAutocomplete-input': {
-                              fontSize: '18px',
-                              padding: '16px 8px',
-                            },
-                          }}
-                        />
-                      </Grid>
-                    </Grid>
-
-                    {/* Search Action Buttons */}
-                    <Box sx={{ mt: 5, display: 'flex', gap: 3, justifyContent: 'center', flexWrap: 'wrap' }}>
-                      <Button
-                        variant="contained"
-                        size="large"
-                        onClick={handlePrimarySearch}
-                        disabled={isLoading || (productNames.length === 0 && uniqueProductNames.length === 0 && entities.length === 0)}
-                        sx={{
-                          borderRadius: '16px',
-                          px: 6,
-                          py: 2,
-                          fontSize: '16px',
-                          fontWeight: 600,
-                          minWidth: '200px',
-                          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                          boxShadow: '0 8px 25px rgba(102, 126, 234, 0.3)',
-                          '&:hover': {
-                            background: 'linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%)',
-                            transform: 'translateY(-3px)',
-                            boxShadow: '0 12px 35px rgba(102, 126, 234, 0.4)',
-                          },
-                          '&:disabled': {
-                            background: 'rgba(0, 0, 0, 0.12)',
-                            transform: 'none',
-                            boxShadow: 'none',
-                          }
-                        }}
-                        startIcon={isLoading ? <CircularProgress size={24} color="inherit" /> : <Search />}
-                      >
-                        {isLoading ? 'Searching...' : 'Search Products'}
-                      </Button>
-                      
-                      {(productNames.length > 0 || uniqueProductNames.length > 0 || entities.length > 0) && (
-                        <Button
-                          variant="outlined"
-                          size="large"
-                          onClick={clearSearch}
-                          sx={{
-                            borderRadius: '16px',
-                            px: 6,
-                            py: 2,
-                            fontSize: '16px',
-                            fontWeight: 600,
-                            minWidth: '150px',
-                            borderColor: 'rgba(102, 126, 234, 0.3)',
-                            color: '#667eea',
-                            borderWidth: '2px',
-                            '&:hover': {
-                              borderColor: '#667eea',
-                              backgroundColor: 'rgba(102, 126, 234, 0.05)',
-                              transform: 'translateY(-2px)',
-                              borderWidth: '2px',
-                            },
-                          }}
-                        >
-                          Clear All
-                        </Button>
-                      )}
-
-                      {hasData && (
-                        <>
-                          <Button
-                            variant="text"
-                            size="large"
-                            onClick={() => setShowFilters(!showFilters)}
-                            sx={{
-                              borderRadius: '16px',
-                              px: 4,
-                              py: 2,
-                              fontSize: '16px',
-                              fontWeight: 600,
-                              color: '#667eea',
-                              '&:hover': {
-                                backgroundColor: 'rgba(102, 126, 234, 0.05)',
-                              },
-                            }}
-                            startIcon={<FilterList />}
-                          >
-                            {showFilters ? 'Hide Filters' : 'Show Filters'}
-                          </Button>
-                          
-                          <Button
-                            variant="outlined"
-                            size="large"
-                            onClick={exportResults}
-                            sx={{
-                              borderRadius: '16px',
-                              px: 4,
-                              py: 2,
-                              fontSize: '16px',
-                              fontWeight: 600,
-                              borderColor: '#10b981',
-                              color: '#10b981',
-                              '&:hover': {
-                                backgroundColor: 'rgba(16, 185, 129, 0.05)',
-                                borderColor: '#10b981',
-                              },
-                            }}
-                            startIcon={<Download />}
-                          >
-                            Export CSV
-                          </Button>
-
-                          {hasData && (productNames.length > 0 || uniqueProductNames.length > 0) && (
-                            <Button
-                              variant="outlined"
-                              size="large"
-                              onClick={fetchTopImporters}
-                              disabled={loadingTopImporters}
-                              sx={{
-                                borderRadius: '16px',
-                                px: 4,
-                                py: 2,
-                                fontSize: '16px',
-                                fontWeight: 600,
-                                borderColor: '#f59e0b',
-                                color: '#f59e0b',
-                                '&:hover': {
-                                  backgroundColor: 'rgba(245, 158, 11, 0.05)',
-                                  borderColor: '#f59e0b',
-                                },
-                              }}
-                              startIcon={loadingTopImporters ? <CircularProgress size={20} /> : <TrendingUp />}
-                            >
-                              {loadingTopImporters ? 'Loading...' : 'Top Importers'}
-                            </Button>
-                          )}
-                        </>
-                      )}
-                    </Box>
-                  </Box>
-
-                  {/* Additional Filters - Collapsible */}
-                  {showFilters && (
-                    <Fade in={showFilters} timeout={500}>
-                      <Box>
-                        <Divider sx={{ my: 4, borderColor: 'rgba(102, 126, 234, 0.1)', borderWidth: '1px' }} />
-
-                        <Typography 
-                          variant="h5" 
-                          sx={{ 
-                            mb: 1, 
-                            fontWeight: 700,
-                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            backgroundClip: 'text',
-                          }}
-                        >
-                          🔧 Advanced Filters
-                        </Typography>
-                        <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-                          Refine your search results with these additional filters
-                        </Typography>
-
-                        <Grid container spacing={4}>
-                          <Grid item xs={12} md={4}>
-                            <TextField
-                              fullWidth
-                              label="HS Code"
-                              variant="outlined"
-                              value={hsCode}
-                              onChange={(e) => setHsCode(e.target.value)}
-                              placeholder="Enter HS code..."
-                              sx={{
-                                '& .MuiOutlinedInput-root': {
-                                  borderRadius: '16px',
-                                  minHeight: '56px',
-                                  fontSize: '16px',
-                                  transition: 'all 0.3s ease',
-                                  backgroundColor: 'rgba(99, 102, 241, 0.03)',
-                                  border: '2px solid rgba(99, 102, 241, 0.1)',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(99, 102, 241, 0.08)',
-                                    borderColor: 'rgba(99, 102, 241, 0.3)',
-                                  },
-                                  '&.Mui-focused': {
-                                    backgroundColor: 'rgba(99, 102, 241, 0.08)',
-                                    borderColor: '#6366f1',
-                                  },
-                                },
-                                '& .MuiInputLabel-root': {
-                                  fontSize: '16px',
-                                  fontWeight: 500,
-                                },
-                              }}
-                              InputProps={{
-                                startAdornment: (
-                                  <InputAdornment position="start">
-                                    <QrCode sx={{ color: '#6366f1' }} />
-                                  </InputAdornment>
-                                ),
-                              }}
-                            />
-                          </Grid>
-                          
-                          <Grid item xs={12} md={4}>
-                            <TextField
-                              fullWidth
-                              label="Importer ID"
-                              variant="outlined"
-                              value={importerId}
-                              onChange={(e) => setImporterId(e.target.value)}
-                              placeholder="Enter importer ID..."
-                              sx={{
-                                '& .MuiOutlinedInput-root': {
-                                  borderRadius: '16px',
-                                  minHeight: '56px',
-                                  fontSize: '16px',
-                                  transition: 'all 0.3s ease',
-                                  backgroundColor: 'rgba(168, 85, 247, 0.03)',
-                                  border: '2px solid rgba(168, 85, 247, 0.1)',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(168, 85, 247, 0.08)',
-                                    borderColor: 'rgba(168, 85, 247, 0.3)',
-                                  },
-                                  '&.Mui-focused': {
-                                    backgroundColor: 'rgba(168, 85, 247, 0.08)',
-                                    borderColor: '#a855f7',
-                                  },
-                                },
-                                '& .MuiInputLabel-root': {
-                                  fontSize: '16px',
-                                  fontWeight: 500,
-                                },
-                              }}
-                              InputProps={{
-                                startAdornment: (
-                                  <InputAdornment position="start">
-                                    <PersonPin sx={{ color: '#a855f7' }} />
-                                  </InputAdornment>
-                                ),
-                              }}
-                            />
-                          </Grid>
-                          
-                          <Grid item xs={12} md={4}>
-                            <TextField
-                              fullWidth
-                              label="Port Name"
-                              variant="outlined"
-                              value={portName}
-                              onChange={(e) => setPortName(e.target.value)}
-                              placeholder="Enter port name..."
-                              sx={{
-                                '& .MuiOutlinedInput-root': {
-                                  borderRadius: '16px',
-                                  minHeight: '56px',
-                                  fontSize: '16px',
-                                  transition: 'all 0.3s ease',
-                                  backgroundColor: 'rgba(59, 130, 246, 0.03)',
-                                  border: '2px solid rgba(59, 130, 246, 0.1)',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(59, 130, 246, 0.08)',
-                                    borderColor: 'rgba(59, 130, 246, 0.3)',
-                                  },
-                                  '&.Mui-focused': {
-                                    backgroundColor: 'rgba(59, 130, 246, 0.08)',
-                                    borderColor: '#3b82f6',
-                                  },
-                                },
-                                '& .MuiInputLabel-root': {
-                                  fontSize: '16px',
-                                  fontWeight: 500,
-                                },
-                              }}
-                              InputProps={{
-                                startAdornment: (
-                                  <InputAdornment position="start">
-                                    <LocationOn sx={{ color: '#3b82f6' }} />
-                                  </InputAdornment>
-                                ),
-                              }}
-                            />
-                          </Grid>
-                        </Grid>
-
-                        {/* Date Selection */}
-                        <Box sx={{ mt: 5 }}>
-                          <Typography variant="h6" sx={{ mb: 3, fontWeight: 600, color: '#667eea' }}>
-                            📅 Date Range
-                          </Typography>
-                          
-                          <FormControl component="fieldset" sx={{ mb: 3 }}>
-                            <RadioGroup
-                              row
-                              value={dateMode}
-                              onChange={(e) => setDateMode(e.target.value as 'single' | 'range')}
-                              sx={{ gap: 4 }}
-                            >
-                              <FormControlLabel 
-                                value="single" 
-                                control={<Radio sx={{ color: '#667eea' }} />} 
-                                label={<Typography variant="body1" fontWeight={500}>Single Date</Typography>}
-                              />
-                              <FormControlLabel 
-                                value="range" 
-                                control={<Radio sx={{ color: '#667eea' }} />} 
-                                label={<Typography variant="body1" fontWeight={500}>Date Range</Typography>}
-                              />
-                            </RadioGroup>
-                          </FormControl>
-
-                          <Grid container spacing={4}>
-                            {dateMode === 'single' ? (
-                              <Grid item xs={12} md={6}>
-                                <DatePicker
-                                  label="Select Date"
-                                  value={singleDate}
-                                  onChange={(newValue) => setSingleDate(newValue)}
-                                  slotProps={{
-                                    textField: {
-                                      fullWidth: true,
-                                      sx: {
-                                        '& .MuiOutlinedInput-root': {
-                                          borderRadius: '16px',
-                                          minHeight: '56px',
-                                          fontSize: '16px',
-                                          backgroundColor: 'rgba(244, 114, 182, 0.03)',
-                                          border: '2px solid rgba(244, 114, 182, 0.1)',
-                                          '&:hover': {
-                                            backgroundColor: 'rgba(244, 114, 182, 0.08)',
-                                            borderColor: 'rgba(244, 114, 182, 0.3)',
-                                          },
-                                          '&.Mui-focused': {
-                                            backgroundColor: 'rgba(244, 114, 182, 0.08)',
-                                            borderColor: '#f472b6',
-                                          },
-                                        },
-                                        '& .MuiInputLabel-root': {
-                                          fontSize: '16px',
-                                          fontWeight: 500,
-                                        },
-                                      },
-                                      InputProps: {
-                                        startAdornment: (
-                                          <InputAdornment position="start">
-                                            <CalendarToday sx={{ color: '#f472b6' }} />
-                                          </InputAdornment>
-                                        ),
-                                      }
-                                    }
-                                  }}
-                                />
-                              </Grid>
-                            ) : (
-                              <>
-                                <Grid item xs={12} md={6}>
-                                  <DatePicker
-                                    label="Start Date"
-                                    value={startDate}
-                                    onChange={(newValue) => setStartDate(newValue)}
-                                    slotProps={{
-                                      textField: {
-                                        fullWidth: true,
-                                        sx: {
-                                          '& .MuiOutlinedInput-root': {
-                                            borderRadius: '16px',
-                                            minHeight: '56px',
-                                            fontSize: '16px',
-                                            backgroundColor: 'rgba(244, 114, 182, 0.03)',
-                                            border: '2px solid rgba(244, 114, 182, 0.1)',
-                                            '&:hover': {
-                                              backgroundColor: 'rgba(244, 114, 182, 0.08)',
-                                              borderColor: 'rgba(244, 114, 182, 0.3)',
-                                            },
-                                            '&.Mui-focused': {
-                                              backgroundColor: 'rgba(244, 114, 182, 0.08)',
-                                              borderColor: '#f472b6',
-                                            },
-                                          },
-                                          '& .MuiInputLabel-root': {
-                                            fontSize: '16px',
-                                            fontWeight: 500,
-                                          },
-                                        },
-                                        InputProps: {
-                                          startAdornment: (
-                                            <InputAdornment position="start">
-                                              <DateRange sx={{ color: '#f472b6' }} />
-                                            </InputAdornment>
-                                          ),
-                                        }
-                                      }
-                                    }}
-                                  />
-                                </Grid>
-                                <Grid item xs={12} md={6}>
-                                  <DatePicker
-                                    label="End Date"
-                                    value={endDate}
-                                    onChange={(newValue) => setEndDate(newValue)}
-                                    minDate={startDate || undefined}
-                                    slotProps={{
-                                      textField: {
-                                        fullWidth: true,
-                                        sx: {
-                                          '& .MuiOutlinedInput-root': {
-                                            borderRadius: '16px',
-                                            minHeight: '56px',
-                                            fontSize: '16px',
-                                            backgroundColor: 'rgba(244, 114, 182, 0.03)',
-                                            border: '2px solid rgba(244, 114, 182, 0.1)',
-                                            '&:hover': {
-                                              backgroundColor: 'rgba(244, 114, 182, 0.08)',
-                                              borderColor: 'rgba(244, 114, 182, 0.3)',
-                                            },
-                                            '&.Mui-focused': {
-                                              backgroundColor: 'rgba(244, 114, 182, 0.08)',
-                                              borderColor: '#f472b6',
-                                            },
-                                          },
-                                          '& .MuiInputLabel-root': {
-                                            fontSize: '16px',
-                                            fontWeight: 500,
-                                          },
-                                        },
-                                        InputProps: {
-                                          startAdornment: (
-                                            <InputAdornment position="start">
-                                              <DateRange sx={{ color: '#f472b6' }} />
-                                            </InputAdornment>
-                                          ),
-                                        }
-                                      }
-                                    }}
-                                  />
-                                </Grid>
-                              </>
-                            )}
-                          </Grid>
-                        </Box>
-                      </Box>
-                    </Fade>
-                  )}
-
-                  {/* Results Section */}
-                  {hasData && searchResults && (
-                    <Fade in={hasData} timeout={800}>
-                      <Box sx={{ mt: 6 }}>
-                        <Divider sx={{ mb: 4, borderColor: 'rgba(102, 126, 234, 0.1)', borderWidth: '1px' }} />
-                        
-                        <Paper
-                          elevation={8}
-                          sx={{ 
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.03) 0%, rgba(118, 75, 162, 0.03) 100%)',
-                            border: '1px solid rgba(102, 126, 234, 0.1)',
-                            overflow: 'hidden'
-                          }}
-                        >
-                          {/* Results Header */}
-                          <Box sx={{ p: 4, pb: 2 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                              <Typography 
-                                variant="h5" 
-                                sx={{ 
-                                  fontWeight: 700,
-                                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                  WebkitBackgroundClip: 'text',
-                                  WebkitTextFillColor: 'transparent',
-                                  backgroundClip: 'text',
-                                }}
-                              >
-                                📊 Search Results
-                              </Typography>
-                              <Chip 
-                                label={`${searchResults.count} total items`}
-                                variant="outlined"
-                                sx={{ 
-                                  fontWeight: 600,
-                                  borderColor: '#667eea',
-                                  color: '#667eea',
-                                  fontSize: '14px'
-                                }}
-                              />
-                              {searchResults.error && (
-                                <Chip 
-                                  label="⚠️ Partial results"
-                                  color="warning"
-                                  variant="outlined"
-                                  size="small"
-                                />
-                              )}
-                            </Box>
-                            
-                            {searchResults.data.length > 0 && (
-                              <Typography variant="body2" color="text.secondary">
-                                Showing {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, searchResults.data.length)} of {searchResults.data.length} results
-                              </Typography>
-                            )}
-                          </Box>
-                          
-                          {/* Results Table */}
-                          {searchResults.data.length > 0 ? (
-                            <Box>
-                              <TableContainer sx={{ maxHeight: '600px' }}>
-                                <Table stickyHeader size="small">
-                                  <TableHead>
-                                    <TableRow>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
-                                        SYSTEM ID
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 110 }}>
-                                        REG DATE
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
-                                        MONTH YEAR
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
-                                        HS CODE
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 80 }}>
-                                        CHAPTER
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 200 }}>
-                                        PRODUCT NAME
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 200 }}>
-                                        UNIQUE PRODUCT NAME
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
-                                        QUANTITY
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 80 }}>
-                                        UNIT
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
-                                        UNIT PRICE (USD)
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 140 }}>
-                                        TOTAL VALUE (USD)
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
-                                        IMPORTER ID
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 200 }}>
-                                        IMPORTER NAME
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
-                                        CITY
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 150 }}>
-                                        CHA NUMBER
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 150 }}>
-                                        TYPE
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 200 }}>
-                                        SUPPLIER NAME
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 250 }}>
-                                        SUPPLIER ADDRESS
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
-                                        INDIAN PORT
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
-                                        FOREIGN PORT
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
-                                        ORIGIN COUNTRY
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 120 }}>
-                                        EXCHANGE RATE
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
-                                        DUTY
-                                      </TableCell>
-                                      <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(102, 126, 234, 0.05)', borderBottom: '2px solid rgba(102, 126, 234, 0.1)', minWidth: 100 }}>
-                                        ACTIONS
-                                      </TableCell>
-                                    </TableRow>
-                                  </TableHead>
-                                  <TableBody>
-                                    {paginatedData.map((row, index) => (
-                                      <TableRow 
-                                        key={index}
-                                        sx={{ 
-                                          '&:hover': { 
-                                            backgroundColor: 'rgba(102, 126, 234, 0.02)' 
-                                          },
-                                          '&:nth-of-type(even)': {
-                                            backgroundColor: 'rgba(0, 0, 0, 0.01)'
-                                          }
-                                        }}
-                                      >
-                                        <TableCell sx={{ fontSize: '13px', fontFamily: 'monospace' }}>
-                                          {row.system_id || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px' }}>
-                                          {row.reg_date ? new Date(row.reg_date).toLocaleDateString() : '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px' }}>
-                                          {row.month_year || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', fontFamily: 'monospace' }}>
-                                          {row.hs_code || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px' }}>
-                                          {row.chapter || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', maxWidth: 200 }}>
-                                          <Box 
-                                            title={row.product_name || '-'}
-                                            sx={{ 
-                                              overflow: 'hidden', 
-                                              textOverflow: 'ellipsis', 
-                                              whiteSpace: 'nowrap' 
-                                            }}
-                                          >
-                                            {row.product_name && row.product_name.length > 30 
-                                              ? `${row.product_name.substring(0, 30)}...` 
-                                              : row.product_name || '-'
-                                            }
-                                          </Box>
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', maxWidth: 200 }}>
-                                          <Box 
-                                            title={row.unique_product_name || '-'}
-                                            sx={{ 
-                                              overflow: 'hidden', 
-                                              textOverflow: 'ellipsis', 
-                                              whiteSpace: 'nowrap' 
-                                            }}
-                                          >
-                                            {row.unique_product_name && row.unique_product_name.length > 30 
-                                              ? `${row.unique_product_name.substring(0, 30)}...` 
-                                              : row.unique_product_name || '-'
-                                            }
-                                          </Box>
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
-                                          {row.quantity ? Number(row.quantity).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px' }}>
-                                          {row.unit_quantity || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
-                                          {row.unit_price_usd ? `$${Number(row.unit_price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right', fontWeight: 600 }}>
-                                          {row.total_value_usd ? `$${Number(row.total_value_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', fontFamily: 'monospace' }}>
-                                          {row.importer_id || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', maxWidth: 200 }}>
-                                          <Box 
-                                            title={row.true_importer_name || '-'}
-                                            sx={{ 
-                                              overflow: 'hidden', 
-                                              textOverflow: 'ellipsis', 
-                                              whiteSpace: 'nowrap' 
-                                            }}
-                                          >
-                                            {row.true_importer_name && row.true_importer_name.length > 25 
-                                              ? `${row.true_importer_name.substring(0, 25)}...` 
-                                              : row.true_importer_name || '-'
-                                            }
-                                          </Box>
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px' }}>
-                                          {row.city || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', maxWidth: 150 }}>
-                                          <Box 
-                                            title={row.cha_number || '-'}
-                                            sx={{ 
-                                              overflow: 'hidden', 
-                                              textOverflow: 'ellipsis', 
-                                              whiteSpace: 'nowrap' 
-                                            }}
-                                          >
-                                            {row.cha_number && row.cha_number.length > 20 
-                                              ? `${row.cha_number.substring(0, 20)}...` 
-                                              : row.cha_number || '-'
-                                            }
-                                          </Box>
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', maxWidth: 150 }}>
-                                          <Box 
-                                            title={row.type || '-'}
-                                            sx={{ 
-                                              overflow: 'hidden', 
-                                              textOverflow: 'ellipsis', 
-                                              whiteSpace: 'nowrap' 
-                                            }}
-                                          >
-                                            {row.type && row.type.length > 20 
-                                              ? `${row.type.substring(0, 20)}...` 
-                                              : row.type || '-'
-                                            }
-                                          </Box>
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', maxWidth: 200 }}>
-                                          <Box 
-                                            title={row.true_supplier_name || '-'}
-                                            sx={{ 
-                                              overflow: 'hidden', 
-                                              textOverflow: 'ellipsis', 
-                                              whiteSpace: 'nowrap' 
-                                            }}
-                                          >
-                                            {row.true_supplier_name && row.true_supplier_name.length > 25 
-                                              ? `${row.true_supplier_name.substring(0, 25)}...` 
-                                              : row.true_supplier_name || '-'
-                                            }
-                                          </Box>
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', maxWidth: 250 }}>
-                                          <Box 
-                                            title={row.supplier_address || '-'}
-                                            sx={{ 
-                                              overflow: 'hidden', 
-                                              textOverflow: 'ellipsis', 
-                                              whiteSpace: 'nowrap' 
-                                            }}
-                                          >
-                                            {row.supplier_address && row.supplier_address.length > 30 
-                                              ? `${row.supplier_address.substring(0, 30)}...` 
-                                              : row.supplier_address || '-'
-                                            }
-                                          </Box>
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px' }}>
-                                          {row.indian_port || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px' }}>
-                                          {row.foreign_port || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px' }}>
-                                          {row.origin_country || '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
-                                          {row.exchange_rate_usd ? Number(row.exchange_rate_usd).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-'}
-                                        </TableCell>
-                                        <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
-                                          {row.duty ? Number(row.duty).toLocaleString() : '-'}
-                                        </TableCell>
-                                        <TableCell>
-                                          <Button
-                                            size="small"
-                                            startIcon={<Visibility />}
-                                            onClick={() => {
-                                              console.log('View details:', row);
-                                              // Add modal or detailed view functionality here
-                                            }}
-                                            sx={{ 
-                                              fontSize: '12px',
-                                              color: '#667eea',
-                                              '&:hover': { backgroundColor: 'rgba(102, 126, 234, 0.1)' }
-                                            }}
-                                          >
-                                            View
-                                          </Button>
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </TableContainer>
-                              
-                              {/* Pagination */}
-                              {totalPages > 1 && (
-                                <Box sx={{ p: 3, display: 'flex', justifyContent: 'center' }}>
-                                  <Pagination 
-                                    count={totalPages}
-                                    page={currentPage}
-                                    onChange={(_, page) => setCurrentPage(page)}
-                                    color="primary"
-                                    size="large"
-                                    sx={{
-                                      '& .MuiPaginationItem-root': {
-                                        fontSize: '16px',
-                                        fontWeight: 500,
-                                      }
-                                    }}
-                                  />
-                                </Box>
-                              )}
-                            </Box>
-                          ) : (
-                            <Box 
-                              sx={{ 
-                                textAlign: 'center', 
-                                py: 8,
-                                px: 4
-                              }}
-                            >
-                              <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-                                No results found
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                Try adjusting your search criteria or filters
-                              </Typography>
-                            </Box>
-                          )}
-                        </Paper>
-                      </Box>
-                    </Fade>
-                  )}
-
-                  {/* Top Importers Section */}
-                  {showTopImporters && topImporters && (
-                    <Fade in={showTopImporters} timeout={800}>
-                      <Box sx={{ mt: 4 }}>
-                        <Paper
-                          elevation={8}
-                          sx={{ 
-                            borderRadius: '20px',
-                            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.03) 0%, rgba(251, 191, 36, 0.03) 100%)',
-                            border: '1px solid rgba(245, 158, 11, 0.1)',
-                            overflow: 'hidden'
-                          }}
-                        >
-                          {/* Top Importers Header */}
-                          <Box sx={{ p: 4, pb: 2 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                              <Typography 
-                                variant="h5" 
-                                sx={{ 
-                                  fontWeight: 700,
-                                  background: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
-                                  WebkitBackgroundClip: 'text',
-                                  WebkitTextFillColor: 'transparent',
-                                  backgroundClip: 'text',
-                                }}
-                              >
-                                📊 Top 10 Importers
-                              </Typography>
-                              <Chip 
-                                label={`${topImporters.count} importers found`}
-                                variant="outlined"
-                                sx={{ 
-                                  fontWeight: 600,
-                                  borderColor: '#f59e0b',
-                                  color: '#f59e0b',
-                                  fontSize: '14px'
-                                }}
-                              />
-                            </Box>
-                            
-                            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                              Top importers by total value for: {topImporters.products_searched?.join(', ')}
-                            </Typography>
-                          </Box>
-                          
-                          {/* Top Importers Table */}
-                          {topImporters.data.length > 0 ? (
-                            <TableContainer sx={{ maxHeight: '500px' }}>
-                              <Table stickyHeader size="small">
-                                <TableHead>
-                                  <TableRow>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 50 }}>
-                                      RANK
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 250 }}>
-                                      IMPORTER NAME
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 120 }}>
-                                      IMPORTER ID
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 100 }}>
-                                      CITY
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 140 }}>
-                                      TOTAL VALUE (USD)
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 100 }}>
-                                      SHIPMENTS
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 120 }}>
-                                      TOTAL QUANTITY
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 120 }}>
-                                      AVG UNIT PRICE
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 110 }}>
-                                      FIRST IMPORT
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 110 }}>
-                                      LAST IMPORT
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 100 }}>
-                                      HS CODES
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600, backgroundColor: 'rgba(245, 158, 11, 0.05)', borderBottom: '2px solid rgba(245, 158, 11, 0.1)', minWidth: 100 }}>
-                                      COUNTRIES
-                                    </TableCell>
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                  {topImporters.data.map((importer, index) => (
-                                    <TableRow 
-                                      key={index}
-                                      sx={{ 
-                                        '&:hover': { 
-                                          backgroundColor: 'rgba(245, 158, 11, 0.02)' 
-                                        },
-                                        '&:nth-of-type(even)': {
-                                          backgroundColor: 'rgba(0, 0, 0, 0.01)'
-                                        }
-                                      }}
-                                    >
-                                      <TableCell sx={{ fontSize: '13px', fontWeight: 600 }}>
-                                        <Chip 
-                                          label={`#${index + 1}`}
-                                          size="small"
-                                          sx={{ 
-                                            backgroundColor: index < 3 ? '#f59e0b' : 'rgba(245, 158, 11, 0.1)',
-                                            color: index < 3 ? 'white' : '#f59e0b',
-                                            fontWeight: 600
-                                          }}
-                                        />
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px', maxWidth: 250 }}>
-                                        <Box 
-                                          title={importer.true_importer_name || '-'}
-                                          sx={{ 
-                                            overflow: 'hidden', 
-                                            textOverflow: 'ellipsis', 
-                                            whiteSpace: 'nowrap',
-                                            fontWeight: 500
-                                          }}
-                                        >
-                                          {importer.true_importer_name && importer.true_importer_name.length > 35 
-                                            ? `${importer.true_importer_name.substring(0, 35)}...` 
-                                            : importer.true_importer_name || '-'
-                                          }
-                                        </Box>
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px', fontFamily: 'monospace' }}>
-                                        {importer.importer_id || '-'}
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px' }}>
-                                        {importer.city || '-'}
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px', textAlign: 'right', fontWeight: 600, color: '#059669' }}>
-                                        {importer.total_value_usd ? `$${Number(importer.total_value_usd).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '-'}
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
-                                        {importer.total_shipments ? Number(importer.total_shipments).toLocaleString() : '-'}
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
-                                        {importer.total_quantity ? Number(importer.total_quantity).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-'}
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px', textAlign: 'right' }}>
-                                        {importer.avg_unit_price_usd ? `$${Number(importer.avg_unit_price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '-'}
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px' }}>
-                                        {importer.first_import_date ? new Date(importer.first_import_date).toLocaleDateString() : '-'}
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px' }}>
-                                        {importer.last_import_date ? new Date(importer.last_import_date).toLocaleDateString() : '-'}
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px', textAlign: 'center' }}>
-                                        <Chip 
-                                          label={importer.unique_hs_codes || 0}
-                                          size="small"
-                                          variant="outlined"
-                                          sx={{ 
-                                            borderColor: '#f59e0b',
-                                            color: '#f59e0b',
-                                            fontSize: '12px'
-                                          }}
-                                        />
-                                      </TableCell>
-                                      <TableCell sx={{ fontSize: '13px', textAlign: 'center' }}>
-                                        <Chip 
-                                          label={importer.unique_countries || 0}
-                                          size="small"
-                                          variant="outlined"
-                                          sx={{ 
-                                            borderColor: '#f59e0b',
-                                            color: '#f59e0b',
-                                            fontSize: '12px'
-                                          }}
-                                        />
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </TableContainer>
-                          ) : (
-                            <Box 
-                              sx={{ 
-                                textAlign: 'center', 
-                                py: 6,
-                                px: 4
-                              }}
-                            >
-                              <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-                                No importers found
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                No importer data available for the selected products
-                              </Typography>
-                            </Box>
-                          )}
-                        </Paper>
-
-                        {/* Add the Chart Component */}
-                        <Box sx={{ mt: 4 }}>
-                          <ImporterChart 
-                            data={topImporters.data} 
-                            products_searched={topImporters.products_searched || []}
-                          />
-                        </Box>
-                      </Box>
-                    </Fade>
-                  )}
-
-                  {/* ... rest of existing code ... */}
-                </CardContent>
-              </Card>
-            </Box>
-          </Fade>
-        </Container>
-      </Box>
-    </LocalizationProvider>
+        <Alert
+          onClose={() => setNotification(prev => ({ ...prev, open: false }))}
+          severity={notification.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {notification.message}
+        </Alert>
+      </Snackbar>
+    </Box>
   );
 }
