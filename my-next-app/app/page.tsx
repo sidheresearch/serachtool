@@ -18,6 +18,7 @@ import { AdvancedFilters } from './components/AdvancedFilters';
 import { QuickDateFilters } from './components/QuickDateFilters';
 import { ResultsTable } from './components/ResultsTable';
 import { TopImportersSection } from './components/TopImportersSection';
+import { ClientSideFilters } from './components/ClientSideFilters';
 
 // Import API and types
 import { tradeAPI, SearchResponse, TopImportersResponse, SearchFilters } from './utils/api';
@@ -47,6 +48,13 @@ export default function Home() {
   const [originalResults, setOriginalResults] = useState<SearchResponse | null>(null);
   const [topImporters, setTopImporters] = useState<TopImportersResponse | null>(null);
   const [showTopImporters, setShowTopImporters] = useState(false);
+  const [filteredResults, setFilteredResults] = useState<SearchResponse | null>(null);
+  const [clientFilters, setClientFilters] = useState({
+    hsCode: '',
+    importerId: '',
+    portName: '',
+    importerName: ''
+  });
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -64,10 +72,11 @@ export default function Home() {
   });
 
   // Computed values
-  const hasData = searchResults && searchResults.data.length > 0;
-  const totalPages = hasData ? Math.ceil(searchResults.data.length / itemsPerPage) : 0;
+  const currentResults = filteredResults || searchResults;
+  const hasData = currentResults && currentResults.data.length > 0;
+  const totalPages = hasData ? Math.ceil(currentResults.data.length / itemsPerPage) : 0;
   const paginatedData = hasData 
-    ? searchResults.data.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+    ? currentResults.data.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
     : [];
 
   // Helper functions
@@ -78,10 +87,12 @@ export default function Home() {
   const buildFilters = (): SearchFilters => {
     const filters: SearchFilters = {};
     
+    // Add the basic filters
     if (hsCode.trim()) filters.hs_code = hsCode.trim();
     if (importerId.trim()) filters.importer_id = importerId.trim();
     if (portName.trim()) filters.port_name = portName.trim();
     
+    // Add date filters
     filters.date_mode = dateMode;
     if (dateMode === 'single' && singleDate) {
       filters.single_date = singleDate.format('YYYY-MM-DD');
@@ -90,10 +101,72 @@ export default function Home() {
       filters.end_date = endDate.format('YYYY-MM-DD');
     }
     
+    console.log('Applied filters:', filters);
     return filters;
   };
 
-  // Main search function
+  const applyClientSideFilters = useCallback((filters: {
+    hsCode: string;
+    importerId: string;
+    portName: string;
+    importerName: string;
+  }) => {
+    if (!searchResults || searchResults.data.length === 0) return;
+
+    setClientFilters(filters);
+
+    const filtered = searchResults.data.filter(item => {
+      // HS Code filter
+      if (filters.hsCode && !item.hs_code?.toLowerCase().includes(filters.hsCode.toLowerCase())) {
+        return false;
+      }
+      
+      // Importer ID filter
+      if (filters.importerId && !item.importer_id?.toLowerCase().includes(filters.importerId.toLowerCase())) {
+        return false;
+      }
+      
+      // Port Name filter (check both indian_port and foreign_port)
+      if (filters.portName) {
+        const portNameLower = filters.portName.toLowerCase();
+        const indianPort = item.indian_port?.toLowerCase() || '';
+        const foreignPort = item.foreign_port?.toLowerCase() || '';
+        
+        if (!indianPort.includes(portNameLower) && !foreignPort.includes(portNameLower)) {
+          return false;
+        }
+      }
+      
+      // Importer Name filter
+      if (filters.importerName && !item.true_importer_name?.toLowerCase().includes(filters.importerName.toLowerCase())) {
+        return false;
+      }
+      
+      return true;
+    });
+
+    setFilteredResults({
+      ...searchResults,
+      data: filtered,
+      count: filtered.length
+    });
+
+    setCurrentPage(1); // Reset to first page
+    showNotification(`Filtered to ${filtered.length} results`, 'info');
+  }, [searchResults, showNotification]);
+
+  const clearClientSideFilters = useCallback(() => {
+    setFilteredResults(null);
+    setClientFilters({
+      hsCode: '',
+      importerId: '',
+      portName: '',
+      importerName: ''
+    });
+    setCurrentPage(1);
+    showNotification('Filters cleared', 'info');
+  }, [showNotification]);
+
   const handlePrimarySearch = useCallback(async () => {
     if (productNames.length === 0 && uniqueProductNames.length === 0 && entities.length === 0) {
       showNotification('Please select at least one search term', 'warning');
@@ -103,6 +176,10 @@ export default function Home() {
     setIsLoading(true);
     setCurrentPage(1);
     setShowTopImporters(false);
+    
+    // Clear client filters on new search
+    setFilteredResults(null);
+    setClientFilters({ hsCode: '', importerId: '', portName: '', importerName: '' });
     
     try {
       const filters = buildFilters();
@@ -132,7 +209,6 @@ export default function Home() {
     }
   }, [productNames, uniqueProductNames, entities, hsCode, importerId, portName, dateMode, singleDate, startDate, endDate]);
 
-  // Clear search function
   const clearSearch = useCallback(() => {
     setProductNames([]);
     setUniqueProductNames([]);
@@ -151,7 +227,6 @@ export default function Home() {
     showNotification('Search cleared', 'info');
   }, []);
 
-  // Quick date filter function
   const handleQuickDateFilterExistingData = useCallback((days: number) => {
     if (!originalResults || originalResults.data.length === 0) {
       showNotification('No data to filter', 'warning');
@@ -174,7 +249,6 @@ export default function Home() {
     showNotification(`Filtered to last ${days} days: ${filteredData.length} results`, 'info');
   }, [originalResults]);
 
-  // Clear date filter function
   const handleClearDateFilter = useCallback(() => {
     if (originalResults) {
       setSearchResults(originalResults);
@@ -183,7 +257,6 @@ export default function Home() {
     }
   }, [originalResults]);
 
-  // Custom date range search function
   const handleCustomDateRangeSearch = useCallback(async (startDateStr: string, endDateStr: string) => {
     if (productNames.length === 0 && uniqueProductNames.length === 0) {
       showNotification('Please select products first', 'warning');
@@ -220,7 +293,6 @@ export default function Home() {
     }
   }, [productNames, uniqueProductNames, hsCode, importerId, portName]);
 
-  // Top importers function
   const fetchTopImporters = useCallback(async () => {
     if (productNames.length === 0 && uniqueProductNames.length === 0) {
       showNotification('Please search for products first', 'warning');
@@ -250,9 +322,11 @@ export default function Home() {
     }
   }, [productNames, uniqueProductNames, hsCode, importerId, portName, dateMode, singleDate, startDate, endDate]);
 
-  // Export function
   const exportResults = useCallback(() => {
-    if (!searchResults || searchResults.data.length === 0) {
+    // Use currentResults instead of searchResults to export filtered data
+    const dataToExport = currentResults || searchResults;
+    
+    if (!dataToExport || dataToExport.data.length === 0) {
       showNotification('No data to export', 'warning');
       return;
     }
@@ -268,7 +342,7 @@ export default function Home() {
 
       const csvContent = [
         headers.join(','),
-        ...searchResults.data.map(row => [
+        ...dataToExport.data.map(row => [
           row.system_id || '',
           row.reg_date || '',
           row.month_year || '',
@@ -292,7 +366,7 @@ export default function Home() {
           row.origin_country || '',
           row.exchange_rate_usd || '',
           row.duty || ''
-        ].join(','))
+        ].join(',')),
       ].join('\n');
 
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -305,12 +379,16 @@ export default function Home() {
       link.click();
       document.body.removeChild(link);
       
-      showNotification('Data exported successfully', 'success');
+      const isFiltered = filteredResults !== null;
+      showNotification(
+        `${isFiltered ? 'Filtered ' : ''}Data exported successfully (${dataToExport.data.length} rows)`, 
+        'success'
+      );
     } catch (error) {
       console.error('Export error:', error);
       showNotification('Export failed', 'error');
     }
-  }, [searchResults]);
+  }, [currentResults, searchResults, filteredResults, showNotification]);
 
   return (
     <Box 
@@ -323,7 +401,7 @@ export default function Home() {
       <Container maxWidth="xl" sx={{ px: { xs: 2, sm: 3 } }}>
         <Fade in={true} timeout={1000}>
           <Box>
-            {/* Header */}
+            
             <Header />
 
             <Card 
@@ -402,6 +480,14 @@ export default function Home() {
                 <TopImportersSection
                   showTopImporters={showTopImporters}
                   topImporters={topImporters}
+                />
+
+                {/* Client Side Filters - New Component */}
+                <ClientSideFilters
+                  clientFilters={clientFilters}
+                  applyClientSideFilters={applyClientSideFilters}
+                  clearClientSideFilters={clearClientSideFilters}
+                  isLoading={isLoading}
                 />
               </CardContent>
             </Card>

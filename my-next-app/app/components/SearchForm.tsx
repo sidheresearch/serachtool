@@ -246,28 +246,28 @@ export function SearchForm({
           </Button>
         )}
 
+        <Button
+          variant="text"
+          size="large"
+          onClick={() => setShowFilters(!showFilters)}
+          sx={{
+            borderRadius: '16px',
+            px: 4,
+            py: 2,
+            fontSize: '16px',
+            fontWeight: 600,
+            color: '#667eea',
+            '&:hover': {
+              backgroundColor: 'rgba(102, 126, 234, 0.05)',
+            },
+          }}
+          startIcon={<FilterList />}
+        >
+          {showFilters ? 'Hide Filters' : 'Show Filters'}
+        </Button>
+        
         {hasData && (
           <>
-            <Button
-              variant="text"
-              size="large"
-              onClick={() => setShowFilters(!showFilters)}
-              sx={{
-                borderRadius: '16px',
-                px: 4,
-                py: 2,
-                fontSize: '16px',
-                fontWeight: 600,
-                color: '#667eea',
-                '&:hover': {
-                  backgroundColor: 'rgba(102, 126, 234, 0.05)',
-                },
-              }}
-              startIcon={<FilterList />}
-            >
-              {showFilters ? 'Hide Filters' : 'Show Filters'}
-            </Button>
-            
             <Button
               variant="outlined"
               size="large"
@@ -290,7 +290,7 @@ export function SearchForm({
               Export CSV
             </Button>
 
-            {hasData && (productNames.length > 0 || uniqueProductNames.length > 0) && (
+            {(productNames.length > 0 || uniqueProductNames.length > 0) && (
               <Button
                 variant="outlined"
                 size="large"
