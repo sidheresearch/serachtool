@@ -18,20 +18,156 @@ def get_engine():
     return create_engine(DATABASE_URL)
 
 # Fuzzy Search Functions
-def fuzzy_match(query: str, choices: List[str], limit: int = 50) -> List[str]:
+def clean_product_name(name: str) -> str:
+    """Clean product name by removing codes and unnecessary characters"""
+    import re
+    # Remove leading numbers/codes (like 00000167343)
+    cleaned = re.sub(r'^\d{8,}', '', name)
+    # Remove repeated text patterns
+    words = cleaned.split()
+    # Remove duplicates while preserving order and filter out numeric codes
+    seen = set()
+    unique_words = []
+    for word in words:
+        word_lower = word.lower()
+        # Skip if already seen or if it's a pure number
+        if word_lower not in seen and not re.match(r'^\d+$', word):
+            seen.add(word_lower)
+            unique_words.append(word)
+    return ' '.join(unique_words).strip()
+
+def clean_entity_name(name: str) -> str:
+    """Clean entity name by standardizing common company suffixes and formats"""
+    import re
+    # Remove extra whitespace and normalize
+    cleaned = re.sub(r'\s+', ' ', name.strip())
+    
+    # Handle truncated names (common in entity data)
+    # If name ends abruptly without common suffix, it might be truncated
+    common_suffixes = ['LIMITED', 'LTD', 'PRIVATE', 'PVT', 'LLP', 'CORPORATION', 'CORP', 'INC', 'COMPANY', 'CO']
+    
+    # Check if name appears to be truncated (doesn't end with common business suffix)
+    ends_with_suffix = any(cleaned.upper().endswith(suffix) for suffix in common_suffixes)
+    
+    # If it doesn't end with a suffix and ends with incomplete words, it might be truncated
+    if not ends_with_suffix and len(cleaned) > 10:
+        words = cleaned.split()
+        last_word = words[-1] if words else ""
+        
+        # Special handling for common truncated patterns
+        if last_word.upper() in ['LIMI', 'PRIV', 'LIMIT', 'PRIVAT']:
+            # Remove the truncated word
+            cleaned = ' '.join(words[:-1])
+        elif len(last_word) < 4 and last_word.upper() not in ['LTD', 'LLC', 'INC', 'PVT', 'LLP', 'PTE']:
+            # Remove very short last words that might be truncated
+            cleaned = ' '.join(words[:-1])
+    
+    return cleaned.strip()
+
+def fuzzy_match(query: str, choices: List[str], limit: int = 50, search_type: str = "general") -> List[str]:
     """Perform fuzzy matching and return top matches"""
     if not query or not choices:
         return []
     
-    matches = process.extractBests(
-        query, 
-        choices, 
-        scorer=fuzz.partial_ratio,
-        score_cutoff=60,
-        limit=limit
-    )
+    # For product_name searches, clean the choices first
+    if search_type == "product_name":
+        # Create a mapping of cleaned names to original names
+        cleaned_to_original = {}
+        cleaned_choices = []
+        
+        for choice in choices:
+            cleaned = clean_product_name(choice)
+            if len(cleaned) > 2:  # Only include meaningful cleaned names
+                cleaned_choices.append(cleaned)
+                cleaned_to_original[cleaned] = choice
+        
+        # Perform fuzzy matching on cleaned names
+        matches = process.extractBests(
+            query, 
+            cleaned_choices, 
+            scorer=fuzz.token_sort_ratio,  # Better for product names
+            score_cutoff=70,
+            limit=limit
+        )
+        
+        # Return original names
+        return [cleaned_to_original[match[0]] for match in matches]
     
-    return [match[0] for match in matches]
+    elif search_type == "entity":
+        # For entity searches, try multiple scoring approaches
+        # First try token_sort_ratio (good for exact matches)
+        token_matches = process.extractBests(
+            query, 
+            choices, 
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=65,
+            limit=limit
+        )
+        
+        # Also try partial_ratio (good for partial matches)
+        partial_matches = process.extractBests(
+            query, 
+            choices, 
+            scorer=fuzz.partial_ratio,
+            score_cutoff=70,
+            limit=limit
+        )
+        
+        # Combine and deduplicate results
+        all_results = []
+        seen = set()
+        
+        # Add token matches first (higher priority)
+        for match in token_matches:
+            if match[0] not in seen:
+                all_results.append(match[0])
+                seen.add(match[0])
+        
+        # Add partial matches
+        for match in partial_matches:
+            if match[0] not in seen:
+                all_results.append(match[0])
+                seen.add(match[0])
+        
+        # If still not enough results, try with cleaned entity names
+        if len(all_results) < limit // 2:
+            cleaned_to_original = {}
+            cleaned_choices = []
+            
+            for choice in choices:
+                cleaned = clean_entity_name(choice)
+                if len(cleaned) > 2:
+                    cleaned_choices.append(cleaned)
+                    cleaned_to_original[cleaned] = choice
+            
+            cleaned_matches = process.extractBests(
+                query, 
+                cleaned_choices, 
+                scorer=fuzz.partial_ratio,
+                score_cutoff=60,
+                limit=limit
+            )
+            
+            # Add cleaned results that aren't already included
+            for match in cleaned_matches:
+                original = cleaned_to_original[match[0]]
+                if original not in seen:
+                    all_results.append(original)
+                    seen.add(original)
+        
+        return all_results[:limit]
+    
+    else:
+        # For other search types, use the original logic
+        matches = process.extractBests(
+            query, 
+            choices, 
+            scorer=fuzz.partial_ratio,
+            score_cutoff=60,
+            limit=limit
+        )
+        
+        return [match[0] for match in matches]
 
 # Cache for database lookups
 _product_names_cache = None
@@ -104,14 +240,38 @@ def get_fuzzy_suggestions(query: str, search_type: str, limit: int = 10) -> List
     try:
         if search_type == "product_name":
             choices = get_product_names()
+            # Use improved fuzzy matching for product names
+            results = fuzzy_match(query, choices, limit * 3, search_type)  # Get more to filter
+            
+            # If we don't get good results from product_name, use unique_product_name as fallback
+            if len(results) < limit:
+                unique_choices = get_unique_product_names()
+                unique_results = fuzzy_match(query, unique_choices, limit * 2, "unique_product_name")
+                
+                # Combine results, but don't label them as [Unique] if we have some good product_name matches
+                if len(results) >= limit // 3:  # If we have at least some good matches
+                    combined = results + unique_results[:limit - len(results)]
+                else:
+                    # If product_name matches are poor, prefer unique_product_name
+                    combined = unique_results[:limit]
+                
+                return combined[:limit]
+            
+            return results[:limit]
+            
         elif search_type == "unique_product_name":
             choices = get_unique_product_names()
+            return fuzzy_match(query, choices, limit, search_type)
+            
         elif search_type == "entity":
             choices = get_entities()
+            # Use improved entity matching
+            results = fuzzy_match(query, choices, limit * 2, search_type)
+            return results[:limit]
+            
         else:
             return []
         
-        return fuzzy_match(query, choices, limit)
     except Exception as e:
         print(f"Error in get_fuzzy_suggestions: {e}")
         return []

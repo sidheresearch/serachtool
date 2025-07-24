@@ -229,7 +229,7 @@ export default function Home() {
                     mb: 2,
                   }}
                 >
-                  🔍 Trade Analytics Tool
+                   Trade Analytics Tool
                 </Typography>
                 <Typography 
                   variant="h6" 
@@ -271,7 +271,7 @@ export default function Home() {
                         backgroundClip: 'text',
                       }}
                     >
-                      🎯 Search Products
+                      Search Products
                     </Typography>
                     <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
                       Start typing to see suggestions and select from the dropdown
