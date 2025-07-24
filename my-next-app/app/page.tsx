@@ -34,7 +34,7 @@ import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
 import { AutocompleteInput } from './components/AutocompleteInput';
-import { tradeAPI, SearchResponse, TopImportersResponse } from './utils/api';
+import { tradeAPI, SearchResponse, TopImportersResponse, TopSuppliersResponse } from './utils/api';
 import { Search, Business, Tag, DateRange, CalendarToday, QrCode, PersonPin, LocationOn, FilterList, Download, Visibility, TrendingUp } from '@mui/icons-material';
 import { ImporterChart } from './components/ImporterChart';
 
@@ -65,6 +65,11 @@ export default function Home() {
   const [topImporters, setTopImporters] = useState<TopImportersResponse | null>(null);
   const [showTopImporters, setShowTopImporters] = useState(false);
   const [loadingTopImporters, setLoadingTopImporters] = useState(false);
+  
+  // Top Suppliers state
+  const [topSuppliers, setTopSuppliers] = useState<TopSuppliersResponse | null>(null);
+  const [showTopSuppliers, setShowTopSuppliers] = useState(false);
+  const [loadingTopSuppliers, setLoadingTopSuppliers] = useState(false);
 
   const itemsPerPage = 10;
 
@@ -116,6 +121,11 @@ export default function Home() {
         await refreshTopImporters(filters);
       }
       
+      // Auto-refresh top suppliers if they were already showing
+      if (showTopSuppliers && (productNames.length > 0 || uniqueProductNames.length > 0)) {
+        await refreshTopSuppliers(filters);
+      }
+      
     } catch (error) {
       console.error('Search failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Search failed. Please try again.';
@@ -145,6 +155,8 @@ export default function Home() {
     setSuccessMessage(null);
     setTopImporters(null);
     setShowTopImporters(false);
+    setTopSuppliers(null);
+    setShowTopSuppliers(false);
   };
 
   const exportResults = () => {
@@ -232,6 +244,72 @@ export default function Home() {
       setSearchError('Failed to fetch top importers data');
     } finally {
       setLoadingTopImporters(false);
+    }
+  };
+
+  // Helper function to refresh top suppliers with current filters
+  const refreshTopSuppliers = async (filters?: any) => {
+    if (!productNames.length && !uniqueProductNames.length) return;
+    
+    try {
+      const currentFilters = filters || {
+        hs_code: hsCode || undefined,
+        importer_id: importerId || undefined,
+        port_name: portName || undefined,
+        date_mode: dateMode,
+        single_date: dateMode === 'single' && singleDate ? singleDate.format('YYYY-MM-DD') : undefined,
+        start_date: dateMode === 'range' && startDate ? startDate.format('YYYY-MM-DD') : undefined,
+        end_date: dateMode === 'range' && endDate ? endDate.format('YYYY-MM-DD') : undefined,
+      };
+
+      let suppliersData: TopSuppliersResponse;
+      
+      if (productNames.length > 0) {
+        suppliersData = await tradeAPI.getTopSuppliersForProducts(productNames, currentFilters);
+      } else if (uniqueProductNames.length > 0) {
+        suppliersData = await tradeAPI.getTopSuppliersForUniqueProducts(uniqueProductNames, currentFilters);
+      } else {
+        return;
+      }
+
+      setTopSuppliers(suppliersData);
+    } catch (error) {
+      console.error('Error refreshing top suppliers:', error);
+    }
+  };
+
+  const fetchTopSuppliers = async () => {
+    if (!searchResults || (!productNames.length && !uniqueProductNames.length)) return;
+    
+    setLoadingTopSuppliers(true);
+    try {
+      const filters = {
+        hs_code: hsCode || undefined,
+        importer_id: importerId || undefined,
+        port_name: portName || undefined,
+        date_mode: dateMode,
+        single_date: dateMode === 'single' && singleDate ? singleDate.format('YYYY-MM-DD') : undefined,
+        start_date: dateMode === 'range' && startDate ? startDate.format('YYYY-MM-DD') : undefined,
+        end_date: dateMode === 'range' && endDate ? endDate.format('YYYY-MM-DD') : undefined,
+      };
+
+      let suppliersData: TopSuppliersResponse;
+      
+      if (productNames.length > 0) {
+        suppliersData = await tradeAPI.getTopSuppliersForProducts(productNames, filters);
+      } else if (uniqueProductNames.length > 0) {
+        suppliersData = await tradeAPI.getTopSuppliersForUniqueProducts(uniqueProductNames, filters);
+      } else {
+        return;
+      }
+
+      setTopSuppliers(suppliersData);
+      setShowTopSuppliers(true);
+    } catch (error) {
+      console.error('Error fetching top suppliers:', error);
+      setSearchError('Failed to fetch top suppliers data');
+    } finally {
+      setLoadingTopSuppliers(false);
     }
   };
 
@@ -571,6 +649,31 @@ export default function Home() {
                               startIcon={loadingTopImporters ? <CircularProgress size={20} /> : <TrendingUp />}
                             >
                               {loadingTopImporters ? 'Loading...' : 'Top Importers'}
+                            </Button>
+                          )}
+
+                          {hasData && (productNames.length > 0 || uniqueProductNames.length > 0) && (
+                            <Button
+                              variant="outlined"
+                              size="large"
+                              onClick={fetchTopSuppliers}
+                              disabled={loadingTopSuppliers}
+                              sx={{
+                                borderRadius: '16px',
+                                px: 4,
+                                py: 2,
+                                fontSize: '16px',
+                                fontWeight: 600,
+                                borderColor: '#8b5cf6',
+                                color: '#8b5cf6',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(139, 92, 246, 0.05)',
+                                  borderColor: '#8b5cf6',
+                                },
+                              }}
+                              startIcon={loadingTopSuppliers ? <CircularProgress size={20} /> : <Business />}
+                            >
+                              {loadingTopSuppliers ? 'Loading...' : 'Top Suppliers'}
                             </Button>
                           )}
                         </>
@@ -1456,6 +1559,181 @@ export default function Home() {
                             products_searched={topImporters.products_searched || []}
                           />
                         </Box>
+                      </Box>
+                    </Fade>
+                  )}
+
+                  {/* Top Suppliers Section */}
+                  {showTopSuppliers && topSuppliers && (
+                    <Fade in={showTopSuppliers} timeout={800}>
+                      <Box sx={{ mt: 4 }}>
+                        <Paper 
+                          elevation={3} 
+                          sx={{ 
+                            p: 4, 
+                            borderRadius: '20px',
+                            background: 'linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%)',
+                            border: '1px solid rgba(139, 92, 246, 0.1)',
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                            <Business sx={{ color: '#8b5cf6', mr: 2, fontSize: 32 }} />
+                            <Box>
+                              <Typography 
+                                variant="h4" 
+                                sx={{ 
+                                  fontWeight: 700,
+                                  background: 'linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%)',
+                                  WebkitBackgroundClip: 'text',
+                                  WebkitTextFillColor: 'transparent',
+                                  backgroundClip: 'text',
+                                  mb: 1
+                                }}
+                              >
+                                🏭 Top Suppliers
+                              </Typography>
+                              <Typography variant="body1" color="text.secondary">
+                                Leading suppliers for {topSuppliers.products_searched?.join(', ')} ({topSuppliers.count} suppliers found)
+                              </Typography>
+                            </Box>
+                          </Box>
+
+                          {topSuppliers.data.length > 0 ? (
+                            <TableContainer 
+                              sx={{ 
+                                borderRadius: '16px',
+                                border: '1px solid rgba(139, 92, 246, 0.1)',
+                                maxHeight: '600px'
+                              }}
+                            >
+                              <Table stickyHeader>
+                                <TableHead>
+                                  <TableRow sx={{ backgroundColor: 'rgba(139, 92, 246, 0.05)' }}>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6' }}>
+                                      Supplier Name
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6' }}>
+                                      Country
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6' }}>
+                                      Total Value (USD)
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6' }}>
+                                      Shipments
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6' }}>
+                                      Quantity
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6' }}>
+                                      Avg Unit Price
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6' }}>
+                                      First Export
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6' }}>
+                                      Last Export
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6', textAlign: 'center' }}>
+                                      HS Codes
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', fontSize: '14px', color: '#8b5cf6', textAlign: 'center' }}>
+                                      Importers
+                                    </TableCell>
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {topSuppliers.data.map((supplier, index) => (
+                                    <TableRow 
+                                      key={index}
+                                      sx={{ 
+                                        '&:hover': { 
+                                          backgroundColor: 'rgba(139, 92, 246, 0.05)',
+                                          transform: 'scale(1.01)',
+                                          transition: 'all 0.2s ease-in-out'
+                                        },
+                                        '&:nth-of-type(odd)': {
+                                          backgroundColor: 'rgba(139, 92, 246, 0.02)'
+                                        }
+                                      }}
+                                    >
+                                      <TableCell sx={{ fontSize: '13px', fontWeight: 600 }}>
+                                        {supplier.true_supplier_name || supplier.supplier_name || '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px' }}>
+                                        <Chip 
+                                          label={supplier.origin_country || 'Unknown'}
+                                          size="small"
+                                          sx={{ 
+                                            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                                            color: '#8b5cf6',
+                                            fontSize: '12px'
+                                          }}
+                                        />
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', fontWeight: 600, color: '#059669' }}>
+                                        {supplier.total_value_usd ? `$${Number(supplier.total_value_usd).toLocaleString()}` : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px' }}>
+                                        {supplier.total_shipments?.toLocaleString() || '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px' }}>
+                                        {supplier.total_quantity ? Number(supplier.total_quantity).toLocaleString() : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px' }}>
+                                        {supplier.avg_unit_price_usd ? `$${Number(supplier.avg_unit_price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px' }}>
+                                        {supplier.first_export_date ? new Date(supplier.first_export_date).toLocaleDateString() : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px' }}>
+                                        {supplier.last_export_date ? new Date(supplier.last_export_date).toLocaleDateString() : '-'}
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', textAlign: 'center' }}>
+                                        <Chip 
+                                          label={supplier.unique_hs_codes || 0}
+                                          size="small"
+                                          variant="outlined"
+                                          sx={{ 
+                                            borderColor: '#8b5cf6',
+                                            color: '#8b5cf6',
+                                            fontSize: '12px'
+                                          }}
+                                        />
+                                      </TableCell>
+                                      <TableCell sx={{ fontSize: '13px', textAlign: 'center' }}>
+                                        <Chip 
+                                          label={supplier.unique_importers || 0}
+                                          size="small"
+                                          variant="outlined"
+                                          sx={{ 
+                                            borderColor: '#8b5cf6',
+                                            color: '#8b5cf6',
+                                            fontSize: '12px'
+                                          }}
+                                        />
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </TableContainer>
+                          ) : (
+                            <Box 
+                              sx={{ 
+                                textAlign: 'center', 
+                                py: 6,
+                                px: 4
+                              }}
+                            >
+                              <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+                                No suppliers found
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                No supplier data available for the selected products
+                              </Typography>
+                            </Box>
+                          )}
+                        </Paper>
                       </Box>
                     </Fade>
                   )}

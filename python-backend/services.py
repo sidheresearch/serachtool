@@ -622,3 +622,181 @@ def get_top_importers_by_unique_product(unique_product_names: List[str], filters
             "error": str(e),
             "products_searched": unique_product_names
         }
+
+def get_top_suppliers_by_product(product_names: List[str], filters: Optional[SearchFilters] = None, limit: int = 10) -> Dict[str, Any]:
+    """Get top suppliers for specific products by total value"""
+    try:
+        engine = get_engine()
+        
+        # Build the base query with aggregation
+        placeholders = ",".join([f":param_{i}" for i in range(len(product_names))])
+        base_query = f"""
+            SELECT 
+                true_supplier_name,
+                supplier_name,
+                origin_country,
+                COUNT(*) as total_shipments,
+                SUM(total_value_usd) as total_value_usd,
+                SUM(quantity) as total_quantity,
+                AVG(unit_price_usd) as avg_unit_price_usd,
+                MIN(reg_date) as first_export_date,
+                MAX(reg_date) as last_export_date,
+                COUNT(DISTINCT hs_code) as unique_hs_codes,
+                COUNT(DISTINCT true_importer_name) as unique_importers
+            FROM analytics.product_icegate_imports 
+            WHERE product_name IN ({placeholders})
+            AND true_supplier_name IS NOT NULL
+            AND total_value_usd IS NOT NULL
+        """
+        
+        # Create parameters dictionary
+        params = {f"param_{i}": name for i, name in enumerate(product_names)}
+        
+        # Add filters (simplified for aggregation query)
+        if filters:
+            param_counter = len(params)
+            
+            if filters.hs_code:
+                base_query += f" AND hs_code = :filter_param_{param_counter}"
+                params[f"filter_param_{param_counter}"] = int(filters.hs_code)
+                param_counter += 1
+            
+            if filters.importer_id:
+                base_query += f" AND importer_id LIKE :filter_param_{param_counter}"
+                params[f"filter_param_{param_counter}"] = f"%{filters.importer_id}%"
+                param_counter += 1
+            
+            if filters.port_name:
+                base_query += f" AND (indian_port LIKE :filter_param_{param_counter} OR foreign_port LIKE :filter_param_{param_counter + 1})"
+                params[f"filter_param_{param_counter}"] = f"%{filters.port_name}%"
+                params[f"filter_param_{param_counter + 1}"] = f"%{filters.port_name}%"
+                param_counter += 2
+                
+            if filters.date_mode == "single" and filters.single_date:
+                base_query += f" AND reg_date = :filter_param_{param_counter}"
+                params[f"filter_param_{param_counter}"] = filters.single_date
+                param_counter += 1
+            elif filters.date_mode == "range":
+                if filters.start_date:
+                    base_query += f" AND reg_date >= :filter_param_{param_counter}"
+                    params[f"filter_param_{param_counter}"] = filters.start_date
+                    param_counter += 1
+                if filters.end_date:
+                    base_query += f" AND reg_date <= :filter_param_{param_counter}"
+                    params[f"filter_param_{param_counter}"] = filters.end_date
+                    param_counter += 1
+        
+        # Group by and order by total value
+        base_query += f"""
+            GROUP BY true_supplier_name, supplier_name, origin_country
+            ORDER BY total_value_usd DESC
+            LIMIT {limit}
+        """
+        
+        # Execute query
+        df = pd.read_sql(text(base_query), engine, params=params)
+        
+        return {
+            "data": df.to_dict('records'),
+            "count": len(df),
+            "search_type": "top_suppliers",
+            "products_searched": product_names
+        }
+    except Exception as e:
+        print(f"Error in get_top_suppliers_by_product: {e}")
+        return {
+            "data": [],
+            "count": 0,
+            "search_type": "top_suppliers",
+            "error": str(e),
+            "products_searched": product_names
+        }
+
+def get_top_suppliers_by_unique_product(unique_product_names: List[str], filters: Optional[SearchFilters] = None, limit: int = 10) -> Dict[str, Any]:
+    """Get top suppliers for specific unique products by total value"""
+    try:
+        engine = get_engine()
+        
+        # Build the base query with aggregation
+        placeholders = ",".join([f":param_{i}" for i in range(len(unique_product_names))])
+        base_query = f"""
+            SELECT 
+                true_supplier_name,
+                supplier_name,
+                origin_country,
+                COUNT(*) as total_shipments,
+                SUM(total_value_usd) as total_value_usd,
+                SUM(quantity) as total_quantity,
+                AVG(unit_price_usd) as avg_unit_price_usd,
+                MIN(reg_date) as first_export_date,
+                MAX(reg_date) as last_export_date,
+                COUNT(DISTINCT hs_code) as unique_hs_codes,
+                COUNT(DISTINCT true_importer_name) as unique_importers
+            FROM analytics.product_icegate_imports 
+            WHERE unique_product_name IN ({placeholders})
+            AND true_supplier_name IS NOT NULL
+            AND total_value_usd IS NOT NULL
+        """
+        
+        # Create parameters dictionary
+        params = {f"param_{i}": name for i, name in enumerate(unique_product_names)}
+        
+        # Add filters (simplified for aggregation query)
+        if filters:
+            param_counter = len(params)
+            
+            if filters.hs_code:
+                base_query += f" AND hs_code = :filter_param_{param_counter}"
+                params[f"filter_param_{param_counter}"] = int(filters.hs_code)
+                param_counter += 1
+            
+            if filters.importer_id:
+                base_query += f" AND importer_id LIKE :filter_param_{param_counter}"
+                params[f"filter_param_{param_counter}"] = f"%{filters.importer_id}%"
+                param_counter += 1
+            
+            if filters.port_name:
+                base_query += f" AND (indian_port LIKE :filter_param_{param_counter} OR foreign_port LIKE :filter_param_{param_counter + 1})"
+                params[f"filter_param_{param_counter}"] = f"%{filters.port_name}%"
+                params[f"filter_param_{param_counter + 1}"] = f"%{filters.port_name}%"
+                param_counter += 2
+                
+            if filters.date_mode == "single" and filters.single_date:
+                base_query += f" AND reg_date = :filter_param_{param_counter}"
+                params[f"filter_param_{param_counter}"] = filters.single_date
+                param_counter += 1
+            elif filters.date_mode == "range":
+                if filters.start_date:
+                    base_query += f" AND reg_date >= :filter_param_{param_counter}"
+                    params[f"filter_param_{param_counter}"] = filters.start_date
+                    param_counter += 1
+                if filters.end_date:
+                    base_query += f" AND reg_date <= :filter_param_{param_counter}"
+                    params[f"filter_param_{param_counter}"] = filters.end_date
+                    param_counter += 1
+        
+        # Group by and order by total value
+        base_query += f"""
+            GROUP BY true_supplier_name, supplier_name, origin_country
+            ORDER BY total_value_usd DESC
+            LIMIT {limit}
+        """
+        
+        # Execute query
+        df = pd.read_sql(text(base_query), engine, params=params)
+        
+        return {
+            "data": df.to_dict('records'),
+            "count": len(df),
+            "search_type": "top_suppliers",
+            "products_searched": unique_product_names
+        }
+    except Exception as e:
+        print(f"Error in get_top_suppliers_by_unique_product: {e}")
+        return {
+            "data": [],
+            "count": 0,
+            "search_type": "top_suppliers",
+            "error": str(e),
+            "products_searched": unique_product_names
+        }

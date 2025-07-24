@@ -44,6 +44,26 @@ export interface TopImportersResponse {
   error?: string;
 }
 
+export interface TopSuppliersResponse {
+  data: {
+    true_supplier_name: string;
+    supplier_name: string;
+    origin_country: string;
+    total_shipments: number;
+    total_value_usd: number;
+    total_quantity: number;
+    avg_unit_price_usd: number;
+    first_export_date: string;
+    last_export_date: string;
+    unique_hs_codes: number;
+    unique_importers: number;
+  }[];
+  count: number;
+  search_type: string;
+  products_searched: string[];
+  error?: string;
+}
+
 export const tradeAPI = {
   // Get fuzzy suggestions with debouncing support
   async getFuzzySuggestions(
@@ -208,6 +228,62 @@ export const tradeAPI = {
     } catch (error) {
       console.error('Error fetching top importers:', error);
       throw new Error(error instanceof Error ? error.message : 'Failed to fetch top importers');
+    }
+  },
+
+  // Get top suppliers for products
+  async getTopSuppliersForProducts(productNames: string[], filters?: SearchFilters): Promise<TopSuppliersResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/search/top-suppliers/products`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ 
+          product_names: productNames, 
+          filters: filters || {} 
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorData}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching top suppliers:', error);
+      throw new Error(error instanceof Error ? error.message : 'Failed to fetch top suppliers');
+    }
+  },
+
+  // Get top suppliers for unique products
+  async getTopSuppliersForUniqueProducts(uniqueProductNames: string[], filters?: SearchFilters): Promise<TopSuppliersResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/search/top-suppliers/unique-products`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ 
+          unique_product_names: uniqueProductNames, 
+          filters: filters || {} 
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorData}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching top suppliers:', error);
+      throw new Error(error instanceof Error ? error.message : 'Failed to fetch top suppliers');
     }
   }
 };

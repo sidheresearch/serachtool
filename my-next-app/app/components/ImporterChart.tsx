@@ -93,6 +93,7 @@ export function ImporterChart({ data, products_searched }: ImporterChartProps) {
         borderWidth: 3,
         hoverBorderWidth: 4,
         hoverBorderColor: '#ffffff',
+        hoverOffset: 15, // This makes the segment move out on hover
       },
     ],
   };
@@ -218,6 +219,15 @@ export function ImporterChart({ data, products_searched }: ImporterChartProps) {
   const doughnutChartOptions = {
     responsive: true,
     maintainAspectRatio: false,
+    animation: {
+      animateRotate: true,
+      animateScale: true,
+      duration: 1000,
+    },
+    interaction: {
+      intersect: false,
+      mode: 'index' as const,
+    },
     plugins: {
       legend: {
         position: 'right' as const,
@@ -226,7 +236,7 @@ export function ImporterChart({ data, products_searched }: ImporterChartProps) {
           padding: 20,
           font: {
             size: 12,
-            weight: '500',
+            weight: 'normal' as const,
           },
           generateLabels: function(chart: any) {
             const data = chart.data;
@@ -253,7 +263,7 @@ export function ImporterChart({ data, products_searched }: ImporterChartProps) {
         text: `Market Share - ${products_searched.join(', ')}`,
         font: {
           size: 18,
-          weight: 'bold',
+          weight: 'bold' as const,
         },
         padding: {
           top: 10,
@@ -261,19 +271,33 @@ export function ImporterChart({ data, products_searched }: ImporterChartProps) {
         },
       },
       tooltip: {
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        backgroundColor: 'rgba(0, 0, 0, 0.9)',
         titleColor: '#ffffff',
         bodyColor: '#ffffff',
         borderColor: '#f59e0b',
-        borderWidth: 1,
-        cornerRadius: 8,
-        padding: 12,
+        borderWidth: 2,
+        cornerRadius: 12,
+        padding: 16,
+        displayColors: true,
+        boxPadding: 8,
+        usePointStyle: true,
+        titleFont: {
+          size: 14,
+          weight: 'bold' as const,
+        },
+        bodyFont: {
+          size: 13,
+          weight: 'normal' as const,
+        },
         callbacks: {
+          title: function(context: any) {
+            return context[0].label;
+          },
           label: function(context: any) {
             const value = context.parsed;
             const total = values.reduce((a, b) => a + b, 0);
             const percentage = ((value / total) * 100).toFixed(1);
-            return `$${value.toLocaleString()} (${percentage}%)`;
+            return `Value: $${value.toLocaleString()} (${percentage}%)`;
           },
           afterLabel: function(context: any) {
             const dataIndex = context.dataIndex;
@@ -286,6 +310,18 @@ export function ImporterChart({ data, products_searched }: ImporterChartProps) {
         }
       },
     },
+    onHover: (event: any, elements: any) => {
+      // Change cursor to pointer when hovering over segments
+      if (event.native && event.native.target) {
+        event.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+      }
+    },
+    elements: {
+      arc: {
+        hoverBorderWidth: 6,
+        hoverBorderColor: '#ffffff',
+      }
+    }
   };
 
   if (!data || data.length === 0) {

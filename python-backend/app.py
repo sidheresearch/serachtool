@@ -8,7 +8,9 @@ from services import (
     search_by_unique_product_names,
     search_by_entities,
     get_top_importers_by_product,
-    get_top_importers_by_unique_product
+    get_top_importers_by_unique_product,
+    get_top_suppliers_by_product,
+    get_top_suppliers_by_unique_product
 )
 
 app = FastAPI(title="Trade Analytics API")
@@ -104,6 +106,39 @@ async def get_top_importers_unique_products(request: UniqueProductSearchRequest)
             raise HTTPException(status_code=400, detail="Unique product names cannot be empty")
             
         result = get_top_importers_by_unique_product(
+            request.unique_product_names, 
+            request.filters,
+            limit=10
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Top Suppliers endpoints
+@app.post("/api/search/top-suppliers/products")
+async def get_top_suppliers_products(request: ProductSearchRequest):
+    """Get top suppliers for product names"""
+    try:
+        if not request.product_names:
+            raise HTTPException(status_code=400, detail="Product names cannot be empty")
+            
+        result = get_top_suppliers_by_product(
+            request.product_names, 
+            request.filters,
+            limit=10
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/search/top-suppliers/unique-products")
+async def get_top_suppliers_unique_products(request: UniqueProductSearchRequest):
+    """Get top suppliers for unique product names"""
+    try:
+        if not request.unique_product_names:
+            raise HTTPException(status_code=400, detail="Unique product names cannot be empty")
+            
+        result = get_top_suppliers_by_unique_product(
             request.unique_product_names, 
             request.filters,
             limit=10
