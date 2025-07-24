@@ -487,6 +487,17 @@ def get_top_importers_by_product(product_names: List[str], filters: Optional[Sea
                 params[f"filter_param_{param_counter}"] = int(filters.hs_code)
                 param_counter += 1
             
+            if filters.importer_id:
+                base_query += f" AND importer_id LIKE :filter_param_{param_counter}"
+                params[f"filter_param_{param_counter}"] = f"%{filters.importer_id}%"
+                param_counter += 1
+            
+            if filters.port_name:
+                base_query += f" AND (indian_port LIKE :filter_param_{param_counter} OR foreign_port LIKE :filter_param_{param_counter + 1})"
+                params[f"filter_param_{param_counter}"] = f"%{filters.port_name}%"
+                params[f"filter_param_{param_counter + 1}"] = f"%{filters.port_name}%"
+                param_counter += 2
+                
             if filters.date_mode == "single" and filters.single_date:
                 base_query += f" AND reg_date = :filter_param_{param_counter}"
                 params[f"filter_param_{param_counter}"] = filters.single_date
@@ -562,6 +573,17 @@ def get_top_importers_by_unique_product(unique_product_names: List[str], filters
                 base_query += f" AND hs_code = :filter_param_{param_counter}"
                 params[f"filter_param_{param_counter}"] = int(filters.hs_code)
                 param_counter += 1
+            
+            if filters.importer_id:
+                base_query += f" AND importer_id LIKE :filter_param_{param_counter}"
+                params[f"filter_param_{param_counter}"] = f"%{filters.importer_id}%"
+                param_counter += 1
+            
+            if filters.port_name:
+                base_query += f" AND (indian_port LIKE :filter_param_{param_counter} OR foreign_port LIKE :filter_param_{param_counter + 1})"
+                params[f"filter_param_{param_counter}"] = f"%{filters.port_name}%"
+                params[f"filter_param_{param_counter + 1}"] = f"%{filters.port_name}%"
+                param_counter += 2
                 
             if filters.date_mode == "single" and filters.single_date:
                 base_query += f" AND reg_date = :filter_param_{param_counter}"

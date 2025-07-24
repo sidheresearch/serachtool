@@ -111,6 +111,11 @@ export default function Home() {
       setHasData(true);
       setShowFilters(true);
       
+      // Auto-refresh top importers if they were already showing
+      if (showTopImporters && (productNames.length > 0 || uniqueProductNames.length > 0)) {
+        await refreshTopImporters(filters);
+      }
+      
     } catch (error) {
       console.error('Search failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Search failed. Please try again.';
@@ -164,6 +169,37 @@ export default function Home() {
     window.URL.revokeObjectURL(url);
   };
 
+  // Helper function to refresh top importers with current filters
+  const refreshTopImporters = async (filters?: any) => {
+    if (!productNames.length && !uniqueProductNames.length) return;
+    
+    try {
+      const currentFilters = filters || {
+        hs_code: hsCode || undefined,
+        importer_id: importerId || undefined,
+        port_name: portName || undefined,
+        date_mode: dateMode,
+        single_date: dateMode === 'single' && singleDate ? singleDate.format('YYYY-MM-DD') : undefined,
+        start_date: dateMode === 'range' && startDate ? startDate.format('YYYY-MM-DD') : undefined,
+        end_date: dateMode === 'range' && endDate ? endDate.format('YYYY-MM-DD') : undefined,
+      };
+
+      let importersData: TopImportersResponse;
+      
+      if (productNames.length > 0) {
+        importersData = await tradeAPI.getTopImportersForProducts(productNames, currentFilters);
+      } else if (uniqueProductNames.length > 0) {
+        importersData = await tradeAPI.getTopImportersForUniqueProducts(uniqueProductNames, currentFilters);
+      } else {
+        return;
+      }
+
+      setTopImporters(importersData);
+    } catch (error) {
+      console.error('Error refreshing top importers:', error);
+    }
+  };
+
   const fetchTopImporters = async () => {
     if (!searchResults || (!productNames.length && !uniqueProductNames.length)) return;
     
@@ -171,6 +207,8 @@ export default function Home() {
     try {
       const filters = {
         hs_code: hsCode || undefined,
+        importer_id: importerId || undefined,
+        port_name: portName || undefined,
         date_mode: dateMode,
         single_date: dateMode === 'single' && singleDate ? singleDate.format('YYYY-MM-DD') : undefined,
         start_date: dateMode === 'range' && startDate ? startDate.format('YYYY-MM-DD') : undefined,
