@@ -15,7 +15,6 @@ from services import (
 
 app = FastAPI(title="Trade Analytics API")
 
-# Enable CORS for Next.js
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:3001"],

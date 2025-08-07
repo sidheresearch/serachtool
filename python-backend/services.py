@@ -240,10 +240,9 @@ def get_fuzzy_suggestions(query: str, search_type: str, limit: int = 10) -> List
     try:
         if search_type == "product_name":
             choices = get_product_names()
-            # Use improved fuzzy matching for product names
-            results = fuzzy_match(query, choices, limit * 3, search_type)  # Get more to filter
+           
+            results = fuzzy_match(query, choices, limit * 3, search_type)  
             
-            # If we don't get good results from product_name, use unique_product_name as fallback
             if len(results) < limit:
                 unique_choices = get_unique_product_names()
                 unique_results = fuzzy_match(query, unique_choices, limit * 2, "unique_product_name")
