@@ -94,67 +94,67 @@ def fuzzy_match(query: str, choices: List[str], limit: int = 50, search_type: st
         return [cleaned_to_original[match[0]] for match in matches]
     
     elif search_type == "entity":
-        # For entity searches, try multiple scoring approaches
-        # First try token_sort_ratio (good for exact matches)
-        token_matches = process.extractBests(
-            query, 
-            choices, 
-            scorer=fuzz.token_sort_ratio,
-            score_cutoff=65,
-            limit=limit
-        )
-        
-        # Also try partial_ratio (good for partial matches)
-        partial_matches = process.extractBests(
-            query, 
-            choices, 
-            scorer=fuzz.partial_ratio,
-            score_cutoff=70,
-            limit=limit
-        )
-        
-        # Combine and deduplicate results
+        # For entity searches, prioritize exact prefix matches
+        query_upper = query.upper()
         all_results = []
         seen = set()
         
-        # Add token matches first (higher priority)
-        for match in token_matches:
-            if match[0] not in seen:
-                all_results.append(match[0])
-                seen.add(match[0])
+        print(f"Debug fuzzy_match: Query='{query}', Query_upper='{query_upper}', Choices count={len(choices)}")
         
-        # Add partial matches
-        for match in partial_matches:
-            if match[0] not in seen:
-                all_results.append(match[0])
-                seen.add(match[0])
+        # First: Find exact prefix matches (entities starting with the query)
+        prefix_matches = []
+        for choice in choices:
+            if choice.upper().startswith(query_upper):
+                prefix_matches.append(choice)
         
-        # If still not enough results, try with cleaned entity names
-        if len(all_results) < limit // 2:
-            cleaned_to_original = {}
-            cleaned_choices = []
-            
+        print(f"Debug fuzzy_match: Found {len(prefix_matches)} prefix matches: {prefix_matches[:5]}")
+        
+        # Sort prefix matches by length (shorter names first, as they're more likely to be exact matches)
+        prefix_matches.sort(key=len)
+        
+        # Add prefix matches first
+        for match in prefix_matches:
+            if match not in seen and len(all_results) < limit:
+                all_results.append(match)
+                seen.add(match)
+        
+        # Second: Find entities that contain the query anywhere
+        if len(all_results) < limit:
+            contains_matches = []
             for choice in choices:
-                cleaned = clean_entity_name(choice)
-                if len(cleaned) > 2:
-                    cleaned_choices.append(cleaned)
-                    cleaned_to_original[cleaned] = choice
+                if query_upper in choice.upper() and choice not in seen:
+                    contains_matches.append(choice)
             
-            cleaned_matches = process.extractBests(
+            print(f"Debug fuzzy_match: Found {len(contains_matches)} contains matches: {contains_matches[:5]}")
+            
+            # Sort by how early the query appears in the string
+            contains_matches.sort(key=lambda x: x.upper().find(query_upper))
+            
+            # Add contains matches
+            for match in contains_matches:
+                if match not in seen and len(all_results) < limit:
+                    all_results.append(match)
+                    seen.add(match)
+        
+        # Third: If still not enough results, use fuzzy matching
+        if len(all_results) < limit:
+            fuzzy_matches = process.extractBests(
                 query, 
-                cleaned_choices, 
+                [choice for choice in choices if choice not in seen], 
                 scorer=fuzz.partial_ratio,
-                score_cutoff=60,
-                limit=limit
+                score_cutoff=75,
+                limit=limit - len(all_results)
             )
             
-            # Add cleaned results that aren't already included
-            for match in cleaned_matches:
-                original = cleaned_to_original[match[0]]
-                if original not in seen:
-                    all_results.append(original)
-                    seen.add(original)
+            print(f"Debug fuzzy_match: Found {len(fuzzy_matches)} fuzzy matches: {[m[0] for m in fuzzy_matches][:5]}")
+            
+            # Add fuzzy matches
+            for match in fuzzy_matches:
+                if match[0] not in seen:
+                    all_results.append(match[0])
+                    seen.add(match[0])
         
+        print(f"Debug fuzzy_match: Final results count={len(all_results)}: {all_results}")
         return all_results[:limit]
     
     else:
@@ -212,15 +212,15 @@ def get_entities():
     if _entities_cache is None:
         try:
             engine = get_engine()
-            # Get importers
+            # Get ALL importers (no limit)
             importer_df = pd.read_sql(
-                "SELECT DISTINCT true_importer_name FROM analytics.product_icegate_imports WHERE true_importer_name IS NOT NULL LIMIT 500",
+                "SELECT DISTINCT true_importer_name FROM analytics.product_icegate_imports WHERE true_importer_name IS NOT NULL",
                 engine
             )
             
-            # Get suppliers
+            # Get ALL suppliers (no limit)
             supplier_df = pd.read_sql(
-                "SELECT DISTINCT true_supplier_name FROM analytics.product_icegate_imports WHERE true_supplier_name IS NOT NULL LIMIT 500",
+                "SELECT DISTINCT true_supplier_name FROM analytics.product_icegate_imports WHERE true_supplier_name IS NOT NULL",
                 engine
             )
             
@@ -230,6 +230,7 @@ def get_entities():
                 supplier_df["true_supplier_name"].tolist()
             )
             _entities_cache = list(all_entities)
+            print(f"Loaded {len(_entities_cache)} entities into cache")
         except Exception as e:
             print(f"Error loading entities: {e}")
             _entities_cache = ["Sample Entity 1", "Sample Entity 2"]
@@ -264,8 +265,16 @@ def get_fuzzy_suggestions(query: str, search_type: str, limit: int = 10) -> List
             
         elif search_type == "entity":
             choices = get_entities()
+            print(f"Debug: Found {len(choices)} entities in cache")
+            print(f"Debug: First 5 entities: {choices[:5] if choices else 'None'}")
+            
+            # Check if there are any entities containing KLJ
+            klj_entities = [entity for entity in choices if 'KLJ' in entity.upper()]
+            print(f"Debug: Found {len(klj_entities)} entities containing 'KLJ': {klj_entities[:10]}")
+            
             # Use improved entity matching
             results = fuzzy_match(query, choices, limit * 2, search_type)
+            print(f"Debug: Fuzzy match returned {len(results)} results: {results}")
             return results[:limit]
             
         else:
@@ -273,6 +282,8 @@ def get_fuzzy_suggestions(query: str, search_type: str, limit: int = 10) -> List
         
     except Exception as e:
         print(f"Error in get_fuzzy_suggestions: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def build_query_with_filters_dict(base_query: str, params: Dict, filters: Optional[SearchFilters]) -> tuple:
@@ -774,7 +785,6 @@ def get_top_suppliers_by_unique_product(unique_product_names: List[str], filters
                     params[f"filter_param_{param_counter}"] = filters.end_date
                     param_counter += 1
         
-        # Group by and order by total value
         base_query += f"""
             GROUP BY true_supplier_name, supplier_name, origin_country
             ORDER BY total_value_usd DESC
