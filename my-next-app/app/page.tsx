@@ -553,7 +553,7 @@ export default function Home() {
                         }}
                         startIcon={isLoading ? <CircularProgress size={24} color="inherit" /> : <Search />}
                       >
-                        {isLoading ? 'Searching...' : 'Search Products'}
+                        {isLoading ? 'Searching...' : 'Search '}
                       </Button>
                       
                       {(productNames.length > 0 || uniqueProductNames.length > 0 || entities.length > 0) && (

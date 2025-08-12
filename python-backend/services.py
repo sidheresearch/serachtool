@@ -71,23 +71,51 @@ def fuzzy_match(query: str, choices: List[str], limit: int = 50, search_type: st
     
     # For product_name searches, clean the choices first
     if search_type == "product_name":
+        # Pre-filter choices by simple string matching for speed
+        query_upper = query.upper()
+        
+        # Multi-tier filtering for better relevance
+        exact_matches = []
+        starts_with_matches = []
+        contains_matches = []
+        
+        for choice in choices:
+            choice_upper = choice.upper()
+            if choice_upper == query_upper:
+                exact_matches.append(choice)
+            elif choice_upper.startswith(query_upper):
+                starts_with_matches.append(choice)
+            elif query_upper in choice_upper:
+                contains_matches.append(choice)
+        
+        # Prioritize matches: exact > starts_with > contains > fuzzy
+        priority_candidates = exact_matches + starts_with_matches + contains_matches
+        
+        # If we have enough high-priority matches, use those; otherwise include more for fuzzy matching
+        if len(priority_candidates) >= limit * 2:
+            choices_to_process = priority_candidates[:limit * 3]
+        else:
+            # Add some non-matching choices for fuzzy matching, but limit total
+            remaining_choices = [c for c in choices if c not in priority_candidates][:2000]
+            choices_to_process = priority_candidates + remaining_choices
+        
         # Create a mapping of cleaned names to original names
         cleaned_to_original = {}
         cleaned_choices = []
         
-        for choice in choices:
+        for choice in choices_to_process:
             cleaned = clean_product_name(choice)
             if len(cleaned) > 2:  # Only include meaningful cleaned names
                 cleaned_choices.append(cleaned)
                 cleaned_to_original[cleaned] = choice
         
-        # Perform fuzzy matching on cleaned names
+        # Perform fuzzy matching on cleaned names with optimized settings
         matches = process.extractBests(
             query, 
             cleaned_choices, 
-            scorer=fuzz.token_sort_ratio,  # Better for product names
-            score_cutoff=70,
-            limit=limit
+            scorer=fuzz.partial_ratio,  # Faster than token_sort_ratio
+            score_cutoff=70,  # Higher cutoff for better quality
+            limit=limit * 2  # Get more matches to account for deduplication
         )
         
         # Return original names
@@ -175,16 +203,23 @@ _unique_product_names_cache = None
 _entities_cache = None
 
 def get_product_names():
-    """Get all distinct product names"""
+    """Get all distinct product names with limited count for faster performance"""
     global _product_names_cache
     if _product_names_cache is None:
         try:
             engine = get_engine()
+            # Limit to 10,000 most common products for faster performance
             df = pd.read_sql(
-                "SELECT DISTINCT product_name FROM analytics.product_icegate_imports WHERE product_name IS NOT NULL LIMIT 1000",
+                """SELECT DISTINCT product_name 
+                   FROM analytics.product_icegate_imports 
+                   WHERE product_name IS NOT NULL 
+                   LIMIT 10000""",
                 engine
             )
-            _product_names_cache = df["product_name"].tolist()
+            # Remove duplicates and clean empty entries
+            unique_products = list(set(df["product_name"].tolist()))
+            _product_names_cache = [p for p in unique_products if p.strip()]
+            print(f"Loaded {len(_product_names_cache)} unique product names into cache")
         except Exception as e:
             print(f"Error loading product names: {e}")
             _product_names_cache = ["Sample Product 1", "Sample Product 2"]
@@ -197,10 +232,11 @@ def get_unique_product_names():
         try:
             engine = get_engine()
             df = pd.read_sql(
-                "SELECT DISTINCT unique_product_name FROM analytics.product_icegate_imports WHERE unique_product_name IS NOT NULL LIMIT 1000",
+                "SELECT DISTINCT unique_product_name FROM analytics.product_icegate_imports WHERE unique_product_name IS NOT NULL",
                 engine
             )
             _unique_product_names_cache = df["unique_product_name"].tolist()
+            print(f"Loaded {len(_unique_product_names_cache)} unique product names into cache")
         except Exception as e:
             print(f"Error loading unique product names: {e}")
             _unique_product_names_cache = ["Sample Unique Product 1", "Sample Unique Product 2"]
@@ -241,23 +277,19 @@ def get_fuzzy_suggestions(query: str, search_type: str, limit: int = 10) -> List
     try:
         if search_type == "product_name":
             choices = get_product_names()
-           
-            results = fuzzy_match(query, choices, limit * 3, search_type)  
+            results = fuzzy_match(query, choices, limit * 2, search_type)  # Get more for deduplication
             
-            if len(results) < limit:
-                unique_choices = get_unique_product_names()
-                unique_results = fuzzy_match(query, unique_choices, limit * 2, "unique_product_name")
-                
-                # Combine results, but don't label them as [Unique] if we have some good product_name matches
-                if len(results) >= limit // 3:  # If we have at least some good matches
-                    combined = results + unique_results[:limit - len(results)]
-                else:
-                    # If product_name matches are poor, prefer unique_product_name
-                    combined = unique_results[:limit]
-                
-                return combined[:limit]
+            # Remove duplicates while preserving order
+            unique_results = []
+            seen = set()
+            for result in results:
+                if result not in seen:
+                    unique_results.append(result)
+                    seen.add(result)
+                if len(unique_results) >= limit:  # Stop early when we have enough
+                    break
             
-            return results[:limit]
+            return unique_results[:limit]
             
         elif search_type == "unique_product_name":
             choices = get_unique_product_names()
